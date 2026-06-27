@@ -605,8 +605,23 @@ export default class JournalingSystemPlugin extends Plugin {
 
     const content = await this.app.vault.read(file);
     const timestamp = moment().format("HH:mm");
-    const entry = `- ${timestamp} ${text}`;
-    const updated = insertUnderHeading(content, heading, entry);
+    let updated = content;
+    const existingEntries = extractNormalizedCaptureEntries(content, heading);
+
+    for (const line of parseShortTextEntries(text)) {
+      const normalized = normalizeCaptureEntry(line);
+      if (existingEntries.has(normalized)) {
+        continue;
+      }
+
+      updated = insertUnderHeading(updated, heading, `- ${timestamp} ${line}`);
+      existingEntries.add(normalized);
+    }
+
+    if (updated === content) {
+      return;
+    }
+
     await this.app.vault.modify(file, updated);
   }
 
@@ -669,6 +684,16 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }
+
+  getTodayFrontmatter(now = moment()): Record<string, unknown> {
+    const file = this.app.vault.getFileByPath(this.getDailyNotePath(now));
+    if (!file) {
+      return {};
+    }
+
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    return isRecord(frontmatter) ? frontmatter : {};
   }
 }
 
@@ -774,6 +799,7 @@ class JournalingPromptModal extends Modal {
     contentEl.addClass("journaling-system-modal");
     this.setTitle("Journaling System");
 
+    const initialFrontmatter = this.plugin.getTodayFrontmatter();
     const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
     const properties = this.plugin
       .getEnabledProperties()
@@ -786,7 +812,13 @@ class JournalingPromptModal extends Modal {
         cls: "journaling-system-field-label",
       });
 
-      const input = createJournalInput(this.app, this.plugin, fieldEl, definition);
+      const input = createJournalInput(
+        this.app,
+        this.plugin,
+        fieldEl,
+        definition,
+        initialFrontmatter[definition.property]
+      );
       this.inputs.set(definition.id, input);
     }
 
@@ -865,7 +897,8 @@ function createJournalInput(
   app: App,
   plugin: JournalingSystemPlugin,
   fieldEl: HTMLElement,
-  definition: JournalPropertyDefinition
+  definition: JournalPropertyDefinition,
+  initialValue: unknown
 ): JournalFieldInput {
   if (definition.type === "text") {
     const input =
@@ -873,6 +906,7 @@ function createJournalInput(
         ? fieldEl.createEl("textarea", { cls: "journaling-system-textarea" })
         : fieldEl.createEl("input", { type: "text", cls: "journaling-system-input" });
     input.placeholder = definition.placeholder || definition.label;
+    input.value = formatInitialTextValue(initialValue);
     return {
       getValue: () => input.value.trim(),
     };
@@ -886,6 +920,7 @@ function createJournalInput(
     if (definition.min !== undefined) input.min = String(definition.min);
     if (definition.max !== undefined) input.max = String(definition.max);
     input.placeholder = definition.placeholder || definition.label;
+    input.value = formatInitialNumberValue(initialValue);
     return {
       getValue: () => {
         if (input.value.trim().length === 0) {
@@ -903,6 +938,7 @@ function createJournalInput(
       cls: "journaling-system-input",
     });
     input.placeholder = definition.placeholder || definition.label;
+    input.value = formatInitialDateValue(initialValue);
     return {
       getValue: () => input.value.trim(),
     };
@@ -911,6 +947,7 @@ function createJournalInput(
   if (definition.type === "checkbox") {
     const wrapper = fieldEl.createDiv({ cls: "journaling-system-checkbox-row" });
     const input = wrapper.createEl("input", { type: "checkbox" });
+    input.checked = initialValue === true;
     wrapper.createEl("span", { text: definition.label });
     if (definition.placeholder.trim().length > 0) {
       fieldEl.createDiv({
@@ -927,7 +964,8 @@ function createJournalInput(
   const multiInput = new MultiSelectPropertyInput(
     fieldEl,
     existingValues,
-    definition.placeholder || "One entry per line"
+    definition.placeholder || "One entry per line",
+    flattenPropertyValue(initialValue).join("\n")
   );
   return {
     getValue: () => multiInput.getValues(),
@@ -941,13 +979,15 @@ class MultiSelectPropertyInput {
   constructor(
     containerEl: HTMLElement,
     private readonly existingValues: string[],
-    placeholder: string
+    placeholder: string,
+    initialValue: string
   ) {
     const wrapper = containerEl.createDiv({ cls: "journaling-system-multiselect" });
     this.textareaEl = wrapper.createEl("textarea", {
       cls: "journaling-system-textarea journaling-system-multiselect-textarea",
     });
     this.textareaEl.placeholder = placeholder;
+    this.textareaEl.value = initialValue;
     this.suggestionsEl = wrapper.createDiv({ cls: "journaling-system-suggestions" });
 
     this.textareaEl.addEventListener("input", () => this.renderSuggestions());
@@ -1627,12 +1667,6 @@ function toFrontmatterValue(
   }
 
   const text = String(value).trim();
-  if (definition.role === "short") {
-    const stamped = `${time} ${text}`;
-    const existingText = typeof existing === "string" ? existing.trim() : "";
-    return existingText.length > 0 ? `${existingText}\n${stamped}` : stamped;
-  }
-
   return text;
 }
 
@@ -1646,6 +1680,38 @@ function insertUnderHeading(content: string, heading: string, line: string): str
   const before = content.slice(0, insertAt).trimEnd();
   const after = content.slice(insertAt);
   return `${before}\n${line}\n${after}`;
+}
+
+function extractNormalizedCaptureEntries(content: string, heading: string): Set<string> {
+  const headingMatch = findHeadingLine(content, heading);
+  if (!headingMatch) {
+    return new Set();
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  const section = content.slice(headingMatch.end, sectionEnd);
+  return new Set(
+    section
+      .split(/\r?\n/)
+      .map((line) => normalizeCaptureEntry(line))
+      .filter((line) => line.length > 0)
+  );
+}
+
+function parseShortTextEntries(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function normalizeCaptureEntry(line: string): string {
+  return line
+    .trim()
+    .replace(/^[-*]\s+/, "")
+    .replace(/^\d{2}:\d{2}\s+/, "")
+    .trim()
+    .toLowerCase();
 }
 
 function findJournalCursorOffset(content: string, heading: string): number {
@@ -1703,6 +1769,31 @@ function flattenPropertyValue(value: unknown): string[] {
   }
 
   return [String(value)];
+}
+
+function formatInitialTextValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return flattenPropertyValue(value).join("\n");
+  }
+
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value);
+}
+
+function formatInitialNumberValue(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+}
+
+function formatInitialDateValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  const text = String(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
 }
 
 function mergeStringArrays(existing: string[], added: string[]): string[] {

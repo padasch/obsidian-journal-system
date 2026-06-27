@@ -49,6 +49,9 @@ Multi-select fields suggest existing values already used for the configured prop
 name and rank them with lightweight fuzzy matching. Enter multiple values by putting
 one value on each line.
 
+When the journaling modal is reopened for a daily note that already has journal
+properties, existing values are prefilled so the entry can be continued or edited.
+
 ## Development
 
 Install dependencies:
