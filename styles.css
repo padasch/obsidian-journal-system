@@ -1,1 +1,191 @@
-/* Journaling System styles will be added with the journaling modal UI. */
+.journaling-system-settings h1,
+.journaling-system-settings h2,
+.journaling-system-settings h3 {
+  letter-spacing: 0;
+}
+
+.journaling-system-settings-section {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-block: 16px 8px;
+}
+
+.journaling-system-settings-section h2 {
+  margin: 0 0 8px;
+  font-size: var(--font-ui-large);
+}
+
+.journaling-system-section-note {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.journaling-system-setting-label {
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+}
+
+.journaling-system-weekday-row {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(140px, 1fr) minmax(240px, 2fr);
+  padding: 12px 0;
+}
+
+.journaling-system-weekday-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.journaling-system-weekday {
+  align-items: center;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--font-ui-small);
+  height: 30px;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0 10px;
+}
+
+.journaling-system-weekday.is-active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.journaling-system-property-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.journaling-system-property-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 24px minmax(120px, 1.2fr) minmax(140px, 1.2fr) minmax(120px, 1fr) 70px 70px 72px;
+}
+
+.journaling-system-property-input,
+.journaling-system-property-select,
+.journaling-system-number-bound,
+.journaling-system-input,
+.journaling-system-textarea {
+  min-height: 32px;
+  width: 100%;
+}
+
+.journaling-system-textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.journaling-system-remove-property:disabled {
+  visibility: hidden;
+}
+
+.journaling-system-modal-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.journaling-system-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.journaling-system-field-label {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+}
+
+.journaling-system-checkbox-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.journaling-system-multiselect {
+  position: relative;
+}
+
+.journaling-system-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.journaling-system-chip {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+  min-height: 28px;
+  padding: 2px 8px;
+}
+
+.journaling-system-suggestions {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-s);
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  position: absolute;
+  width: 100%;
+  z-index: var(--layer-menu);
+}
+
+.journaling-system-suggestions:empty {
+  display: none;
+}
+
+.journaling-system-suggestion {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-normal);
+  cursor: pointer;
+  min-height: 30px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.journaling-system-suggestion:hover,
+.journaling-system-suggestion:focus {
+  background: var(--background-modifier-hover);
+}
+
+.journaling-system-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+@media (max-width: 700px) {
+  .journaling-system-weekday-row,
+  .journaling-system-property-row {
+    grid-template-columns: 1fr;
+  }
+}

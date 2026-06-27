@@ -22,10 +22,9 @@ Reference docs:
 
 ## First Milestone
 
-The first milestone is a release-ready skeleton plus a real settings surface for the
-planned journaling workflow. It should be installable through BRAT, expose one command
-that proves the plugin is loaded, and let users configure the daily/review behavior
-before the writing and scheduling engine is implemented.
+The first milestone now includes a release-ready plugin with a real settings surface,
+a working journaling modal, daily-note property writing, scheduled prompt checks, and
+long-entry note opening.
 
 Files:
 
@@ -49,17 +48,25 @@ Commands:
 - `npm run build`
 - `npm run package`
 
-Plugin command:
+Plugin commands:
 
 - ID: `open-journaling-prompt`
 - Name: `Open journaling prompt`
-- Initial behavior: open a placeholder modal.
+- Behavior: open the configured journaling modal.
+- ID: `open-long-journal-entry`
+- Name: `Open long journal entry`
+- Behavior: create/open the daily note, set the long-entry property to true, and put
+  the cursor in the long journal section.
+- Review note commands: `open-weekly-review`, `open-monthly-review`,
+  `open-annual-review`.
 
 Settings tab:
 
 - Daily prompt times, weekdays, snooze duration, and missed-prompt catch-up.
 - Daily note folder, date format, long-entry heading, and short-capture heading.
 - Daily field labels and property names.
+- Custom user-defined properties using text, number, date, multi-select, or checkbox
+  types.
 - Weekly, monthly, and annual review schedule settings.
 - Review content options for managed rollups, inline Bases, and long-entry embeds.
 
