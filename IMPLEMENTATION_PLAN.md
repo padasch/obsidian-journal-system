@@ -112,6 +112,8 @@ Review rollup model:
 - Higher-level reviews may include prior review reflections where useful.
 - Long-form entries can be embedded with Obsidian embeds such as
   `![[daily-note#Journal]]`.
+- Generated review notes now refresh a managed long-entry embed block from matching
+  daily notes whose long-entry property is true.
 - Inline Bases can be inserted as live evidence panels for underlying notes.
 - Generated review Bases filter daily notes to the current review period and display
   the configured daily journal properties.

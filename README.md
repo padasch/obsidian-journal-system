@@ -61,6 +61,8 @@ review notes include Bases that filter daily notes to the matching period while
 displaying the configured daily journal properties.
 Review Base columns can be edited as one property per line in settings, with the
 available fields shown below the control.
+When long-entry embeds are enabled, review notes embed matching daily `## Journal`
+sections for notes whose long-entry property is true.
 
 ## Development
 

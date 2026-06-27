@@ -189,6 +189,10 @@ const REVIEW_BASE_START = "<!-- JOURNALING-SYSTEM:BASE:START -->";
 const REVIEW_BASE_END = "<!-- JOURNALING-SYSTEM:BASE:END -->";
 const LEGACY_REVIEW_BASE_BLOCK =
   /```base\s+views:\s+  - type: table\s+    name: Journal source notes\s+```/;
+const REVIEW_LONG_ENTRIES_START = "<!-- JOURNALING-SYSTEM:LONG-ENTRIES:START -->";
+const REVIEW_LONG_ENTRIES_END = "<!-- JOURNALING-SYSTEM:LONG-ENTRIES:END -->";
+const LEGACY_LONG_ENTRIES_PLACEHOLDER =
+  "<!-- Long-entry embeds will be generated in a later milestone. -->";
 
 const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
   {
@@ -568,6 +572,7 @@ export default class JournalingSystemPlugin extends Plugin {
     if (existing) {
       await this.writeReviewProperties(existing, level, now);
       await this.ensureReviewBaseBlock(existing, level, now);
+      await this.ensureReviewLongEntryEmbeds(existing, level, now);
       return existing;
     }
 
@@ -614,7 +619,7 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     if (this.settings.reviews.includeLongEntryEmbeds) {
-      lines.push("## Long entries", "", "<!-- Long-entry embeds will be generated in a later milestone. -->", "");
+      lines.push("## Long entries", "", ...this.createLongEntryEmbedsBlock(level, now), "");
     }
 
     return `${formatFrontmatterBlock(this.getAutomaticFrontmatter(level, now))}${lines.join("\n")}`;
@@ -692,6 +697,39 @@ export default class JournalingSystemPlugin extends Plugin {
     }
   }
 
+  async ensureReviewLongEntryEmbeds(file: TFile, level: ReviewLevel, now = moment()): Promise<void> {
+    if (!this.settings.reviews.includeLongEntryEmbeds) {
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+    const block = this.createLongEntryEmbedsBlock(level, now).join("\n");
+    const withManagedBlock = replaceManagedBlock(
+      content,
+      REVIEW_LONG_ENTRIES_START,
+      REVIEW_LONG_ENTRIES_END,
+      block
+    );
+    const updated =
+      withManagedBlock ??
+      content.replace(LEGACY_LONG_ENTRIES_PLACEHOLDER, block);
+
+    if (updated !== content) {
+      await this.app.vault.modify(file, updated);
+      return;
+    }
+
+    if (sectionContainsManagedBlock(content, "Long entries", REVIEW_LONG_ENTRIES_START)) {
+      return;
+    }
+
+    const withInsertedBlock = insertBlockUnderHeading(content, "Long entries", block);
+
+    if (withInsertedBlock !== content) {
+      await this.app.vault.modify(file, withInsertedBlock);
+    }
+  }
+
   getAutomaticFrontmatter(journalType: JournalType, now = moment()): Record<string, string> {
     const context = this.getTodayContext(now);
     const automatic = this.settings.automaticProperties;
@@ -740,6 +778,73 @@ export default class JournalingSystemPlugin extends Plugin {
       "```",
       REVIEW_BASE_END,
     ];
+  }
+
+  createLongEntryEmbedsBlock(level: ReviewLevel, now = moment()): string[] {
+    const files = this.getLongEntrySourceFiles(level, now);
+    const embeds =
+      files.length > 0
+        ? files.map((file) => formatJournalEmbed(file, this.settings.dailyNote.longEntryHeading))
+        : ["No long journal entries found for this period."];
+
+    return [
+      REVIEW_LONG_ENTRIES_START,
+      ...embeds,
+      REVIEW_LONG_ENTRIES_END,
+    ];
+  }
+
+  getLongEntrySourceFiles(level: ReviewLevel, now = moment()): TFile[] {
+    const automatic = this.settings.automaticProperties;
+    const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
+    const dateProperty = automatic.date.trim() || DEFAULT_SETTINGS.automaticProperties.date;
+    const longProperty = this.getLongProperty().property.trim() || DEFAULT_PROPERTIES[1].property;
+    const period = this.getReviewPeriod(level, now);
+
+    return this.app.vault
+      .getMarkdownFiles()
+      .filter((file) => {
+        const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+        if (!isRecord(frontmatter)) {
+          return false;
+        }
+
+        if (!isTruthyFrontmatterValue(frontmatter[longProperty])) {
+          return false;
+        }
+
+        const journalType = frontmatter[typeProperty];
+        if (journalType !== undefined && String(journalType) !== "daily") {
+          return false;
+        }
+
+        return frontmatterMatchesReviewPeriod(frontmatter, period, dateProperty, level);
+      })
+      .sort((a, b) => {
+        const aFrontmatter = this.app.metadataCache.getFileCache(a)?.frontmatter;
+        const bFrontmatter = this.app.metadataCache.getFileCache(b)?.frontmatter;
+        const aDate = isRecord(aFrontmatter) ? String(aFrontmatter[dateProperty] ?? "") : "";
+        const bDate = isRecord(bFrontmatter) ? String(bFrontmatter[dateProperty] ?? "") : "";
+        return aDate.localeCompare(bDate) || a.path.localeCompare(b.path);
+      });
+  }
+
+  getReviewPeriod(level: ReviewLevel, now = moment()): { property: string; value: string } {
+    const context = this.getTodayContext(now);
+    const automatic = this.settings.automaticProperties;
+    const weekProperty = automatic.week.trim() || DEFAULT_SETTINGS.automaticProperties.week;
+    const monthProperty = automatic.month.trim() || DEFAULT_SETTINGS.automaticProperties.month;
+    const yearProperty = automatic.year.trim() || DEFAULT_SETTINGS.automaticProperties.year;
+
+    if (level === "weekly") {
+      return { property: weekProperty, value: context.week };
+    }
+
+    if (level === "monthly") {
+      return { property: monthProperty, value: context.month };
+    }
+
+    return { property: yearProperty, value: context.year };
   }
 
   getReviewBaseProperties(): string[] {
@@ -2078,6 +2183,90 @@ function sectionContainsBaseBlock(content: string, heading: string): boolean {
 
   const sectionEnd = findSectionEnd(content, headingMatch);
   return content.slice(headingMatch.end, sectionEnd).includes("```base");
+}
+
+function sectionContainsManagedBlock(
+  content: string,
+  heading: string,
+  startMarker: string
+): boolean {
+  const cleanHeading = heading.trim();
+  if (cleanHeading.length === 0) {
+    return false;
+  }
+
+  const headingMatch = findHeadingLine(content, cleanHeading);
+  if (!headingMatch) {
+    return false;
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  return content.slice(headingMatch.end, sectionEnd).includes(startMarker);
+}
+
+function frontmatterMatchesReviewPeriod(
+  frontmatter: Record<string, unknown>,
+  period: { property: string; value: string },
+  dateProperty: string,
+  level: ReviewLevel
+): boolean {
+  if (String(frontmatter[period.property] ?? "") === period.value) {
+    return true;
+  }
+
+  const dateValue = frontmatter[dateProperty];
+  if (dateValue === undefined || dateValue === null) {
+    return false;
+  }
+
+  const date = parseJournalDate(String(dateValue));
+  if (!date?.isValid()) {
+    return false;
+  }
+
+  if (level === "weekly") {
+    return date.format("GGGG-[W]WW") === period.value;
+  }
+
+  if (level === "monthly") {
+    return date.format("YYYY-MM") === period.value;
+  }
+
+  return date.format("YYYY") === period.value;
+}
+
+function parseJournalDate(value: string): Moment | null {
+  const clean = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    return null;
+  }
+
+  const parseMoment = obsidianMoment as unknown as (
+    input: string,
+    format: string,
+    strict: boolean
+  ) => Moment;
+  return parseMoment(clean, "YYYY-MM-DD", true);
+}
+
+function isTruthyFrontmatterValue(value: unknown): boolean {
+  if (value === true) {
+    return true;
+  }
+
+  if (typeof value === "string") {
+    return value.toLowerCase() === "true";
+  }
+
+  return false;
+}
+
+function formatJournalEmbed(file: TFile, heading: string): string {
+  const linkPath = file.path.replace(/\.md$/i, "");
+  const cleanHeading = heading.trim();
+  return cleanHeading.length > 0
+    ? `![[${linkPath}#${cleanHeading}]]`
+    : `![[${linkPath}]]`;
 }
 
 function extractNormalizedCaptureEntries(content: string, heading: string): Set<string> {
