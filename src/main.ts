@@ -39,6 +39,7 @@ type RollupSource = "hybrid-hierarchy" | "daily-notes" | "prior-reviews";
 type ReviewLevel = "weekly" | "monthly" | "annual";
 type JournalType = "daily" | ReviewLevel;
 type BaseRowHeight = "default" | "short" | "medium" | "tall";
+type BaseColumnSizes = Record<string, number>;
 
 interface JournalPropertyDefinition {
   id: string;
@@ -116,6 +117,7 @@ interface JournalingSystemSettings {
     sourceNotesHeading: string;
     baseProperties: string[];
     baseRowHeight: BaseRowHeight;
+    baseColumnSizes: BaseColumnSizes;
   };
 }
 
@@ -124,7 +126,7 @@ interface JournalValue {
   value: string | number | string[] | boolean;
 }
 
-const SETTINGS_SCHEMA_VERSION = 4;
+const SETTINGS_SCHEMA_VERSION = 5;
 const moment = obsidianMoment as unknown as () => Moment;
 
 const WEEKDAYS: Weekday[] = [
@@ -178,6 +180,13 @@ const DEFAULT_REVIEW_BASE_PROPERTIES = [
   "journalLocation",
   "journalMood",
 ];
+
+const DEFAULT_REVIEW_BASE_COLUMN_SIZES: BaseColumnSizes = {
+  journalShort: 550,
+  journalFails: 300,
+  journalTopics: 160,
+  journalLocation: 120,
+};
 
 const REVIEW_BASE_START = "<!-- JOURNALING-SYSTEM:BASE:START -->";
 const REVIEW_BASE_END = "<!-- JOURNALING-SYSTEM:BASE:END -->";
@@ -328,6 +337,7 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     sourceNotesHeading: "Source Notes",
     baseProperties: [...DEFAULT_REVIEW_BASE_PROPERTIES],
     baseRowHeight: "tall",
+    baseColumnSizes: { ...DEFAULT_REVIEW_BASE_COLUMN_SIZES },
   },
 };
 
@@ -394,6 +404,7 @@ export default class JournalingSystemPlugin extends Plugin {
   }
 
   async saveSettings(): Promise<void> {
+    this.settings.schemaVersion = SETTINGS_SCHEMA_VERSION;
     await this.saveData(this.settings);
   }
 
@@ -771,6 +782,7 @@ export default class JournalingSystemPlugin extends Plugin {
           : { property: yearProperty, value: context.year };
     const columns = this.getReviewBaseProperties();
     const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
+    const columnSizes = this.getReviewBaseColumnSizes(columns);
 
     return [
       "```base",
@@ -782,8 +794,20 @@ export default class JournalingSystemPlugin extends Plugin {
       "  - type: table",
       `    name: Daily notes in this ${reviewPeriodLabel(level)}`,
       ...(rowHeight === "default" ? [] : [`    rowHeight: ${rowHeight}`]),
-      "    order:",
-      ...columns.map((property) => `      - ${formatBasePropertyReference(property)}`),
+      ...(columnSizes.length > 0
+        ? [
+            "    columnSize:",
+            ...columnSizes.map(
+              ([property, size]) => `      ${formatBaseColumnSizeKey(property)}: ${size}`
+            ),
+          ]
+        : []),
+      ...(columns.length > 0
+        ? [
+            "    order:",
+            ...columns.map((property) => `      - ${formatBasePropertyReference(property)}`),
+          ]
+        : []),
       "```",
     ];
   }
@@ -876,23 +900,20 @@ export default class JournalingSystemPlugin extends Plugin {
   }
 
   getReviewBaseProperties(): string[] {
-    const configured = normalizeBaseProperties(this.settings.reviews.baseProperties);
-    return configured.length > 0 ? configured : this.getAvailableBaseProperties();
+    return normalizeBaseProperties(this.settings.reviews.baseProperties);
+  }
+
+  getReviewBaseColumnSizes(columns: string[]): Array<[string, number]> {
+    const columnSizes = normalizeBaseColumnSizes(this.settings.reviews.baseColumnSizes);
+
+    return columns.flatMap((property) => {
+      const size = columnSizes[normalizeBaseColumnSizeProperty(property)];
+      return size ? [[property, size] as [string, number]] : [];
+    });
   }
 
   getAvailableBaseProperties(): string[] {
-    const automatic = this.settings.automaticProperties;
-    return dedupeProperties([
-      "file.name",
-      automatic.type,
-      automatic.date,
-      automatic.weekday,
-      automatic.time,
-      automatic.week,
-      automatic.month,
-      automatic.year,
-      ...this.settings.properties.map((property) => property.property),
-    ]);
+    return getAvailableBasePropertiesFromSettings(this.settings);
   }
 
   async appendShortCapture(file: TFile, values: JournalValue[]): Promise<void> {
@@ -1702,23 +1723,12 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addToggleSetting(section, "Inline Bases", "includeInlineBases");
     this.addToggleSetting(section, "Long-entry embeds", "includeLongEntryEmbeds");
 
-    const basePropertiesSetting = new Setting(section)
-      .setName("Base properties")
-      .setDesc("One property per line. Leave empty to show all available journal fields.");
-    basePropertiesSetting.addTextArea((textarea) => {
-      textarea
-        .setPlaceholder(this.plugin.getAvailableBaseProperties().join("\n"))
-        .setValue(this.plugin.settings.reviews.baseProperties.join("\n"))
-        .onChange(async (value) => {
-          this.plugin.settings.reviews.baseProperties = parseLineList(value);
-          await this.plugin.saveSettings();
-        });
-      textarea.inputEl.addClass("journaling-system-base-properties-textarea");
-    });
+    section.createEl("h3", { text: "Base columns" });
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: `Available fields: ${this.plugin.getAvailableBaseProperties().join(", ")}`,
+      text: "Choose which properties appear in generated review Bases and set optional column widths in pixels.",
     });
+    this.renderBasePropertyTable(section);
 
     new Setting(section)
       .setName("Base row height")
@@ -1757,6 +1767,65 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
+  }
+
+  private renderBasePropertyTable(containerEl: HTMLElement): void {
+    const table = containerEl.createDiv({ cls: "journaling-system-base-property-table" });
+    const header = table.createDiv({
+      cls: "journaling-system-base-property-row journaling-system-base-property-header",
+    });
+    header.createDiv({ text: "Show" });
+    header.createDiv({ text: "Property" });
+    header.createDiv({ text: "Column width" });
+
+    const selectedProperties = new Set(this.plugin.getReviewBaseProperties());
+    const columnSizes = normalizeBaseColumnSizes(
+      this.plugin.settings.reviews.baseColumnSizes
+    );
+    const rows = dedupeProperties([
+      ...this.plugin.getReviewBaseProperties(),
+      ...this.plugin.getAvailableBaseProperties(),
+      ...Object.keys(columnSizes),
+    ]);
+
+    for (const property of rows) {
+      const row = table.createDiv({ cls: "journaling-system-base-property-row" });
+      const checkbox = row.createEl("input", { type: "checkbox" });
+      checkbox.checked = selectedProperties.has(property);
+      checkbox.ariaLabel = `Show ${property} in review Bases`;
+      checkbox.addEventListener("change", async () => {
+        const current = this.plugin.getReviewBaseProperties();
+        this.plugin.settings.reviews.baseProperties = checkbox.checked
+          ? dedupeProperties([...current, property])
+          : current.filter((entry) => entry !== property);
+        await this.plugin.saveSettings();
+      });
+
+      const propertyLabel = row.createDiv({
+        cls: "journaling-system-base-property-name",
+        text: property,
+      });
+      propertyLabel.title = property;
+
+      const widthInput = row.createEl("input", {
+        type: "number",
+        cls: "journaling-system-base-width-input",
+      });
+      widthInput.min = "1";
+      widthInput.step = "10";
+      widthInput.placeholder = "Auto";
+      widthInput.value = String(columnSizes[normalizeBaseColumnSizeProperty(property)] ?? "");
+      widthInput.ariaLabel = `Column width for ${property}`;
+      widthInput.addEventListener("change", async () => {
+        const normalized = normalizeBaseColumnSizes({
+          ...this.plugin.settings.reviews.baseColumnSizes,
+          [property]: widthInput.value,
+        });
+        this.plugin.settings.reviews.baseColumnSizes = normalized;
+        widthInput.value = String(normalized[normalizeBaseColumnSizeProperty(property)] ?? "");
+        await this.plugin.saveSettings();
+      });
+    }
   }
 
   private addReviewRow(containerEl: HTMLElement, label: string, level: ReviewLevel): void {
@@ -1936,12 +2005,26 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   }
 
   const migrated = migrateLegacySettings(saved);
+  const savedSchemaVersion = getSavedSchemaVersion(migrated);
   const settings = mergeDefaults(defaults, migrated);
   settings.ui.modalFontSizePx = normalizeModalFontSize(settings.ui.modalFontSizePx);
-  settings.reviews.baseProperties = normalizeBaseProperties(settings.reviews.baseProperties);
-  settings.reviews.baseRowHeight = normalizeBaseRowHeight(settings.reviews.baseRowHeight);
   settings.properties = normalizePropertyDefinitions(settings.properties);
+  settings.reviews.baseProperties = normalizeBaseProperties(settings.reviews.baseProperties);
+  if (settings.reviews.baseProperties.length === 0 && savedSchemaVersion < 5) {
+    settings.reviews.baseProperties = getAvailableBasePropertiesFromSettings(settings);
+  }
+  settings.reviews.baseRowHeight = normalizeBaseRowHeight(settings.reviews.baseRowHeight);
+  settings.reviews.baseColumnSizes = normalizeBaseColumnSizes(
+    settings.reviews.baseColumnSizes
+  );
+  settings.schemaVersion = SETTINGS_SCHEMA_VERSION;
   return settings;
+}
+
+function getSavedSchemaVersion(saved: Record<string, unknown>): number {
+  return typeof saved.schemaVersion === "number" && Number.isFinite(saved.schemaVersion)
+    ? saved.schemaVersion
+    : 0;
 }
 
 function migrateLegacySettings(saved: Record<string, unknown>): Record<string, unknown> {
@@ -2085,6 +2168,52 @@ function normalizeBaseProperties(value: unknown): string[] {
   return [];
 }
 
+function normalizeBaseColumnSizes(value: unknown): BaseColumnSizes {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const normalized: BaseColumnSizes = {};
+  for (const [property, size] of Object.entries(value)) {
+    const cleanProperty = normalizeBaseColumnSizeProperty(property);
+    const cleanSize = normalizeBaseColumnSize(size);
+    if (cleanProperty.length > 0 && cleanSize !== null) {
+      normalized[cleanProperty] = cleanSize;
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeBaseColumnSizeProperty(property: string): string {
+  const clean = property.trim();
+  if (clean.startsWith("note.")) {
+    return clean.slice("note.".length);
+  }
+
+  const noteBracketMatch = /^note\[(["'])(.*)\1\]$/.exec(clean);
+  if (noteBracketMatch) {
+    return noteBracketMatch[2];
+  }
+
+  return clean;
+}
+
+function normalizeBaseColumnSize(value: unknown): number | null {
+  const size =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+
+  if (!Number.isFinite(size) || size <= 0) {
+    return null;
+  }
+
+  return Math.round(size);
+}
+
 function parseLineList(value: string): string[] {
   return dedupeProperties(value.split(/\r?\n/));
 }
@@ -2104,8 +2233,39 @@ function formatBasePropertyReference(property: string): string {
   return `note[${formatBaseString(clean)}]`;
 }
 
+function formatBaseColumnSizeKey(property: string): string {
+  const clean = normalizeBaseColumnSizeProperty(property);
+  const reference =
+    clean === "file.name"
+      ? clean
+      : /^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)
+        ? `note.${clean}`
+        : `note[${formatBaseString(clean)}]`;
+
+  return /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(reference)
+    ? reference
+    : JSON.stringify(reference);
+}
+
 function formatBaseString(value: string): string {
   return JSON.stringify(value);
+}
+
+function getAvailableBasePropertiesFromSettings(
+  settings: JournalingSystemSettings
+): string[] {
+  const automatic = settings.automaticProperties;
+  return dedupeProperties([
+    "file.name",
+    automatic.type,
+    automatic.date,
+    automatic.weekday,
+    automatic.time,
+    automatic.week,
+    automatic.month,
+    automatic.year,
+    ...settings.properties.map((property) => property.property),
+  ]);
 }
 
 function reviewPeriodLabel(level: ReviewLevel): string {

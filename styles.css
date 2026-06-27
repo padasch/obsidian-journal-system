@@ -96,15 +96,50 @@
   resize: vertical;
 }
 
-.journaling-system-base-properties-textarea {
-  font-family: var(--font-monospace);
-  min-height: 160px;
-  resize: vertical;
-  width: min(420px, 100%);
-}
-
 .journaling-system-remove-property:disabled {
   visibility: hidden;
+}
+
+.journaling-system-base-property-table {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin: 8px 0 14px;
+  overflow: hidden;
+  width: min(640px, 100%);
+}
+
+.journaling-system-base-property-row {
+  align-items: center;
+  border-top: 1px solid var(--background-modifier-border);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 54px minmax(180px, 1fr) 132px;
+  min-height: 40px;
+  padding: 6px 10px;
+}
+
+.journaling-system-base-property-row:first-child {
+  border-top: 0;
+}
+
+.journaling-system-base-property-header {
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+}
+
+.journaling-system-base-property-name {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.journaling-system-base-width-input {
+  min-height: 32px;
+  width: 100%;
 }
 
 .modal.journaling-system-modal-shell {
