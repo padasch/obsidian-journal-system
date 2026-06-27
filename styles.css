@@ -113,7 +113,14 @@
 }
 
 .journaling-system-modal {
-  font-size: var(--font-ui-medium);
+  font-size: var(--font-ui-large);
+}
+
+.modal.journaling-system-modal-shell .journaling-system-input,
+.modal.journaling-system-modal-shell .journaling-system-textarea,
+.modal.journaling-system-modal-shell .journaling-system-checkbox-row,
+.modal.journaling-system-modal-shell button {
+  font-size: var(--font-ui-large);
 }
 
 .modal.journaling-system-modal-shell .modal-content {
@@ -136,13 +143,13 @@
 
 .journaling-system-field-label {
   color: var(--text-normal);
-  font-size: var(--font-ui-medium);
+  font-size: var(--font-ui-large);
   font-weight: 600;
 }
 
 .journaling-system-field-hint {
   color: var(--text-muted);
-  font-size: var(--font-ui-small);
+  font-size: var(--font-ui-medium);
 }
 
 .journaling-system-checkbox-row {
@@ -189,7 +196,7 @@
   border-radius: 0;
   color: var(--text-normal);
   cursor: pointer;
-  font-size: var(--font-ui-medium);
+  font-size: var(--font-ui-large);
   min-height: 30px;
   padding: 6px 8px;
   text-align: left;
@@ -222,6 +229,29 @@
     max-height: calc(50dvh - 64px);
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  .journaling-system-modal {
+    font-size: var(--font-ui-medium);
+  }
+
+  .modal.journaling-system-modal-shell .journaling-system-input,
+  .modal.journaling-system-modal-shell .journaling-system-textarea,
+  .modal.journaling-system-modal-shell .journaling-system-checkbox-row,
+  .modal.journaling-system-modal-shell button {
+    font-size: var(--font-ui-medium);
+  }
+
+  .journaling-system-field-label {
+    font-size: var(--font-ui-medium);
+  }
+
+  .journaling-system-field-hint {
+    font-size: var(--font-ui-small);
+  }
+
+  .journaling-system-suggestion {
+    font-size: var(--font-ui-medium);
   }
 
   .journaling-system-weekday-row,
