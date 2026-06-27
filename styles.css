@@ -101,17 +101,24 @@
 }
 
 .modal.journaling-system-modal-shell {
-  align-self: flex-start;
-  margin-top: 12px;
-  max-height: 50vh;
-  overflow: hidden;
-  width: min(720px, calc(100vw - 32px));
+  align-self: center;
+  margin-top: 0;
+  max-height: none;
+  overflow: visible;
+  width: min(760px, calc(100vw - 64px));
+}
+
+.modal.journaling-system-modal-shell .modal-title {
+  font-size: var(--font-ui-large);
+}
+
+.journaling-system-modal {
+  font-size: var(--font-ui-medium);
 }
 
 .modal.journaling-system-modal-shell .modal-content {
-  max-height: calc(50vh - 72px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  max-height: none;
+  overflow: visible;
   padding-bottom: 12px;
 }
 
@@ -129,13 +136,13 @@
 
 .journaling-system-field-label {
   color: var(--text-normal);
-  font-size: var(--font-ui-small);
+  font-size: var(--font-ui-medium);
   font-weight: 600;
 }
 
 .journaling-system-field-hint {
   color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
+  font-size: var(--font-ui-small);
 }
 
 .journaling-system-checkbox-row {
@@ -182,6 +189,7 @@
   border-radius: 0;
   color: var(--text-normal);
   cursor: pointer;
+  font-size: var(--font-ui-medium);
   min-height: 30px;
   padding: 6px 8px;
   text-align: left;
@@ -202,14 +210,18 @@
 
 @media (max-width: 700px) {
   .modal.journaling-system-modal-shell {
+    align-self: flex-start;
     border-radius: 0 0 8px 8px;
     margin-top: 0;
     max-height: 50dvh;
+    overflow: hidden;
     width: 100vw;
   }
 
   .modal.journaling-system-modal-shell .modal-content {
     max-height: calc(50dvh - 64px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .journaling-system-weekday-row,
