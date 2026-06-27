@@ -43,7 +43,8 @@ The settings tab already includes controls for:
 - `Journaling System: Open annual review`
 
 Multi-select fields suggest existing values already used for the configured property
-name and rank them with lightweight fuzzy matching.
+name and rank them with lightweight fuzzy matching. Multi-select fields show several
+entry rows directly in the modal, plus an `Add another` button for longer lists.
 
 ## Development
 

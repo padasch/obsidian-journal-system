@@ -1,7 +1,7 @@
 {
   "id": "journaling-system",
   "name": "Journaling System",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "minAppVersion": "1.5.0",
   "description": "Structured daily journaling prompts and periodic review support.",
   "author": "padasch",

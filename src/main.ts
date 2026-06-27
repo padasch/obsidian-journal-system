@@ -760,6 +760,7 @@ class JournalingPromptModal extends Modal {
     const { contentEl } = this;
     this.inputs.clear();
     contentEl.empty();
+    this.modalEl.addClass("journaling-system-modal-shell");
     contentEl.addClass("journaling-system-modal");
     this.setTitle("Journaling System");
 
@@ -912,104 +913,128 @@ function createJournalInput(
 }
 
 class MultiSelectPropertyInput {
-  private values: string[] = [];
-  private inputEl: HTMLInputElement;
-  private chipsEl: HTMLElement;
-  private suggestionsEl: HTMLElement;
+  private rows: Array<{
+    containerEl: HTMLElement;
+    inputEl: HTMLInputElement;
+    suggestionsEl: HTMLElement;
+  }> = [];
+  private rowsEl: HTMLElement;
 
   constructor(
-    private readonly app: App,
+    app: App,
     containerEl: HTMLElement,
     private readonly existingValues: string[]
   ) {
     const wrapper = containerEl.createDiv({ cls: "journaling-system-multiselect" });
-    this.chipsEl = wrapper.createDiv({ cls: "journaling-system-chip-row" });
-    this.inputEl = wrapper.createEl("input", {
-      type: "text",
-      cls: "journaling-system-input journaling-system-multiselect-input",
-    });
-    this.inputEl.placeholder = "Type to add or search existing values";
-    this.suggestionsEl = wrapper.createDiv({ cls: "journaling-system-suggestions" });
+    this.rowsEl = wrapper.createDiv({ cls: "journaling-system-multiselect-rows" });
 
-    this.inputEl.addEventListener("input", () => this.renderSuggestions());
-    this.inputEl.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === "," || event.key === ";") {
-        event.preventDefault();
-        this.addValue(this.inputEl.value);
-      }
-      if (event.key === "Backspace" && this.inputEl.value.length === 0) {
-        this.values.pop();
-        this.render();
-      }
-    });
+    for (let index = 0; index < 3; index += 1) {
+      this.addRow();
+    }
 
-    this.render();
+    const addButton = wrapper.createEl("button", {
+      text: "Add another",
+      cls: "journaling-system-add-row",
+    });
+    addButton.type = "button";
+    addButton.addEventListener("click", () => {
+      this.addRow("", true);
+    });
   }
 
   getValues(): string[] {
-    this.addValue(this.inputEl.value, false);
-    return [...this.values];
+    return mergeStringArrays(
+      [],
+      this.rows.flatMap((row) => parseMultiSelectEntry(row.inputEl.value))
+    );
   }
 
-  private addValue(value: string, rerender = true): void {
-    const cleaned = value.trim();
-    if (cleaned.length === 0) {
-      return;
-    }
+  private addRow(value = "", focus = false): void {
+    const containerEl = this.rowsEl.createDiv({ cls: "journaling-system-multiselect-row" });
+    const inputEl = containerEl.createEl("input", {
+      type: "text",
+      cls: "journaling-system-input journaling-system-multiselect-input",
+      value,
+    });
+    inputEl.placeholder = "Type or pick a value";
+    const removeButton = containerEl.createEl("button", {
+      text: "Remove",
+      cls: "journaling-system-remove-row",
+    });
+    removeButton.type = "button";
+    const suggestionsEl = containerEl.createDiv({ cls: "journaling-system-suggestions" });
+    const row = { containerEl, inputEl, suggestionsEl };
+    this.rows.push(row);
 
-    if (!this.values.some((existing) => existing.toLowerCase() === cleaned.toLowerCase())) {
-      this.values.push(cleaned);
-    }
+    inputEl.addEventListener("input", () => this.renderSuggestions(row));
+    inputEl.addEventListener("focus", () => this.renderSuggestions(row));
+    inputEl.addEventListener("blur", () => {
+      window.setTimeout(() => suggestionsEl.empty(), 120);
+    });
+    inputEl.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.ensureTrailingEmptyRow(row);
+      }
+    });
+    removeButton.addEventListener("click", () => {
+      this.rows = this.rows.filter((existing) => existing !== row);
+      containerEl.remove();
+      if (this.rows.length === 0) {
+        this.addRow("", true);
+      }
+    });
 
-    this.inputEl.value = "";
-    if (rerender) {
-      this.render();
+    if (focus) {
+      inputEl.focus();
     }
   }
 
-  private render(): void {
-    this.chipsEl.empty();
-
-    for (const value of this.values) {
-      const chip = this.chipsEl.createEl("button", {
-        text: `${value} x`,
-        cls: "journaling-system-chip",
-      });
-      chip.type = "button";
-      chip.addEventListener("click", () => {
-        this.values = this.values.filter((existing) => existing !== value);
-        this.render();
-      });
-    }
-
-    this.renderSuggestions();
-  }
-
-  private renderSuggestions(): void {
-    this.suggestionsEl.empty();
-    const query = this.inputEl.value.trim();
+  private renderSuggestions(row: {
+    inputEl: HTMLInputElement;
+    suggestionsEl: HTMLElement;
+  }): void {
+    row.suggestionsEl.empty();
+    const query = row.inputEl.value.trim();
 
     if (query.length === 0) {
       return;
     }
 
     const suggestions = this.existingValues
-      .filter((value) => !this.values.includes(value))
+      .filter((value) => !this.currentValues().includes(value))
       .map((value) => ({ value, score: fuzzyScore(value, query) }))
       .filter(({ score }) => score > 0)
       .sort((a, b) => b.score - a.score || a.value.localeCompare(b.value))
       .slice(0, 8);
 
     for (const { value } of suggestions) {
-      const button = this.suggestionsEl.createEl("button", {
+      const button = row.suggestionsEl.createEl("button", {
         text: value,
         cls: "journaling-system-suggestion",
       });
       button.type = "button";
       button.addEventListener("click", () => {
-        this.addValue(value);
+        row.inputEl.value = value;
+        row.suggestionsEl.empty();
+        this.ensureTrailingEmptyRow(row);
       });
     }
+  }
+
+  private ensureTrailingEmptyRow(currentRow: { inputEl: HTMLInputElement }): void {
+    if (currentRow.inputEl.value.trim().length === 0) {
+      return;
+    }
+
+    const hasEmptyRow = this.rows.some((row) => row.inputEl.value.trim().length === 0);
+    if (!hasEmptyRow) {
+      this.addRow("", true);
+    }
+  }
+
+  private currentValues(): string[] {
+    return this.rows.flatMap((row) => parseMultiSelectEntry(row.inputEl.value));
   }
 }
 
@@ -1705,6 +1730,13 @@ function parseDelimitedList(value: string): string[] {
     .split(/[,;]+/)
     .map((item) => item.trim())
     .filter((item) => /^\d{2}:\d{2}$/.test(item))
+    .filter((item) => item.length > 0);
+}
+
+function parseMultiSelectEntry(value: string): string[] {
+  return value
+    .split(/[,;]+/)
+    .map((item) => item.trim())
     .filter((item) => item.length > 0);
 }
 

@@ -93,6 +93,21 @@
   visibility: hidden;
 }
 
+.modal.journaling-system-modal-shell {
+  align-self: flex-start;
+  margin-top: 12px;
+  max-height: 50vh;
+  overflow: hidden;
+  width: min(720px, calc(100vw - 32px));
+}
+
+.modal.journaling-system-modal-shell .modal-content {
+  max-height: calc(50vh - 72px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 12px;
+}
+
 .journaling-system-modal-fields {
   display: flex;
   flex-direction: column;
@@ -119,25 +134,33 @@
 }
 
 .journaling-system-multiselect {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.journaling-system-multiselect-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.journaling-system-multiselect-row {
+  align-items: start;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
   position: relative;
 }
 
-.journaling-system-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 6px;
+.journaling-system-remove-row,
+.journaling-system-add-row {
+  min-height: 32px;
+  white-space: nowrap;
 }
 
-.journaling-system-chip {
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  color: var(--text-normal);
-  cursor: pointer;
-  font-size: var(--font-ui-small);
-  min-height: 28px;
-  padding: 2px 8px;
+.journaling-system-add-row {
+  align-self: flex-start;
 }
 
 .journaling-system-suggestions {
@@ -151,6 +174,7 @@
   max-height: 180px;
   overflow-y: auto;
   position: absolute;
+  top: 32px;
   width: 100%;
   z-index: var(--layer-menu);
 }
@@ -184,8 +208,23 @@
 }
 
 @media (max-width: 700px) {
+  .modal.journaling-system-modal-shell {
+    border-radius: 0 0 8px 8px;
+    margin-top: 0;
+    max-height: 50dvh;
+    width: 100vw;
+  }
+
+  .modal.journaling-system-modal-shell .modal-content {
+    max-height: calc(50dvh - 64px);
+  }
+
   .journaling-system-weekday-row,
   .journaling-system-property-row {
     grid-template-columns: 1fr;
+  }
+
+  .journaling-system-multiselect-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
