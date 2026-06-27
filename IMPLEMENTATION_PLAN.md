@@ -84,6 +84,10 @@ Daily capture fields:
 - `journalDate`: automatic date
 - `journalTime`: automatic time
 - `journalWeekday`: automatic weekday
+- `journalType`: automatic note type (`daily`, `weekly`, `monthly`, or `annual`)
+- `journalWeek`: automatic ISO week key, for example `2026-W26`
+- `journalMonth`: automatic month key, for example `2026-06`
+- `journalYear`: automatic year key, for example `2026`
 
 Long-form writing:
 
@@ -107,6 +111,8 @@ Review rollup model:
 - Long-form entries can be embedded with Obsidian embeds such as
   `![[daily-note#Journal]]`.
 - Inline Bases can be inserted as live evidence panels for underlying notes.
+- Generated review Bases filter daily notes to the current review period and display
+  the configured daily journal properties.
 
 ## Release Workflow
 

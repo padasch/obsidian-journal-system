@@ -30,7 +30,8 @@ The settings tab already includes controls for:
 - Additional user-defined properties with text, number, date, multi-select, or
   checkbox property types.
 - Per-field placeholder text for all journal fields.
-- Automatic property names for journal date, time, and weekday.
+- Automatic property names for journal type, date, time, weekday, ISO week,
+  month, and year.
 - Weekly, monthly, and annual review schedules.
 - Review content options for managed rollups, inline Bases, and long-entry embeds.
 - Folder fields use Obsidian's native fuzzy selection modal for quick selection.
@@ -51,6 +52,11 @@ one value on each line.
 
 When the journaling modal is reopened for a daily note that already has journal
 properties, existing values are prefilled so the entry can be continued or edited.
+
+Daily and review notes receive `journalType` frontmatter. Daily notes also receive
+period keys such as `journalWeek`, `journalMonth`, and `journalYear`, and generated
+review notes include Bases that filter daily notes to the matching period while
+displaying the configured daily journal properties.
 
 ## Development
 

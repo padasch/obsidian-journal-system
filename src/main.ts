@@ -37,6 +37,7 @@ type JournalPropertyRole =
   | "custom";
 type RollupSource = "hybrid-hierarchy" | "daily-notes" | "prior-reviews";
 type ReviewLevel = "weekly" | "monthly" | "annual";
+type JournalType = "daily" | ReviewLevel;
 
 interface JournalPropertyDefinition {
   id: string;
@@ -74,6 +75,10 @@ interface JournalingSystemSettings {
     date: string;
     time: string;
     weekday: string;
+    type: string;
+    week: string;
+    month: string;
+    year: string;
   };
   reviews: {
     weekly: {
@@ -149,6 +154,11 @@ const ROLLUP_SOURCE_LABELS: Record<RollupSource, string> = {
   "daily-notes": "Daily notes only",
   "prior-reviews": "Prior reviews",
 };
+
+const REVIEW_BASE_START = "<!-- JOURNALING-SYSTEM:BASE:START -->";
+const REVIEW_BASE_END = "<!-- JOURNALING-SYSTEM:BASE:END -->";
+const LEGACY_REVIEW_BASE_BLOCK =
+  /```base\s+views:\s+  - type: table\s+    name: Journal source notes\s+```/;
 
 const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
   {
@@ -248,6 +258,10 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     date: "journalDate",
     time: "journalTime",
     weekday: "journalWeekday",
+    type: "journalType",
+    week: "journalWeek",
+    month: "journalMonth",
+    year: "journalYear",
   },
   reviews: {
     weekly: {
@@ -360,11 +374,21 @@ export default class JournalingSystemPlugin extends Plugin {
     return longProperty ?? DEFAULT_PROPERTIES[1];
   }
 
-  getTodayContext(now = moment()): { date: string; time: string; weekday: string } {
+  getTodayContext(now = moment()): {
+    date: string;
+    time: string;
+    weekday: string;
+    week: string;
+    month: string;
+    year: string;
+  } {
     return {
       date: now.format("YYYY-MM-DD"),
       time: now.format("HH:mm"),
       weekday: now.format("dddd"),
+      week: now.format("GGGG-[W]WW"),
+      month: now.format("YYYY-MM"),
+      year: now.format("YYYY"),
     };
   }
 
@@ -499,7 +523,7 @@ export default class JournalingSystemPlugin extends Plugin {
 
   createDailyNoteContent(now = moment()): string {
     const title = now.format(this.settings.dailyNote.dateFormat);
-    return `# ${title}\n\n## ${this.settings.dailyNote.longEntryHeading}\n`;
+    return `${formatFrontmatterBlock(this.getAutomaticFrontmatter("daily", now))}# ${title}\n\n## ${this.settings.dailyNote.longEntryHeading}\n`;
   }
 
   async getOrCreateReviewNote(level: ReviewLevel, now = moment()): Promise<TFile> {
@@ -507,6 +531,8 @@ export default class JournalingSystemPlugin extends Plugin {
     const existing = this.app.vault.getFileByPath(notePath);
 
     if (existing) {
+      await this.writeReviewProperties(existing, level, now);
+      await this.ensureReviewBaseBlock(existing, level, now);
       return existing;
     }
 
@@ -547,11 +573,7 @@ export default class JournalingSystemPlugin extends Plugin {
       lines.push(
         `## ${this.settings.reviews.sourceNotesHeading}`,
         "",
-        "```base",
-        "views:",
-        "  - type: table",
-        "    name: Journal source notes",
-        "```",
+        ...this.createReviewBaseBlock(level, now),
         ""
       );
     }
@@ -560,17 +582,18 @@ export default class JournalingSystemPlugin extends Plugin {
       lines.push("## Long entries", "", "<!-- Long-entry embeds will be generated in a later milestone. -->", "");
     }
 
-    return lines.join("\n");
+    return `${formatFrontmatterBlock(this.getAutomaticFrontmatter(level, now))}${lines.join("\n")}`;
   }
 
   async writeJournalProperties(file: TFile, values: JournalValue[]): Promise<void> {
-    const context = this.getTodayContext();
-    const automatic = this.settings.automaticProperties;
+    const now = moment();
+    const context = this.getTodayContext(now);
+    const automaticFrontmatter = this.getAutomaticFrontmatter("daily", now);
 
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      frontmatter[automatic.date] = context.date;
-      frontmatter[automatic.time] = context.time;
-      frontmatter[automatic.weekday] = context.weekday;
+      for (const [property, value] of Object.entries(automaticFrontmatter)) {
+        frontmatter[property] = value;
+      }
 
       for (const { definition, value } of values) {
         if (!definition.enabled || definition.property.trim().length === 0) {
@@ -585,6 +608,110 @@ export default class JournalingSystemPlugin extends Plugin {
         );
       }
     });
+  }
+
+  async writeReviewProperties(file: TFile, level: ReviewLevel, now = moment()): Promise<void> {
+    const automaticFrontmatter = this.getAutomaticFrontmatter(level, now);
+
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      for (const [property, value] of Object.entries(automaticFrontmatter)) {
+        frontmatter[property] = value;
+      }
+    });
+  }
+
+  async ensureReviewBaseBlock(file: TFile, level: ReviewLevel, now = moment()): Promise<void> {
+    if (!this.settings.reviews.includeInlineBases) {
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+    const block = this.createReviewBaseBlock(level, now).join("\n");
+    const withManagedBlock = replaceManagedBlock(
+      content,
+      REVIEW_BASE_START,
+      REVIEW_BASE_END,
+      block
+    );
+    const updated =
+      withManagedBlock ??
+      content.replace(LEGACY_REVIEW_BASE_BLOCK, block);
+
+    if (updated !== content) {
+      await this.app.vault.modify(file, updated);
+      return;
+    }
+
+    if (sectionContainsBaseBlock(content, this.settings.reviews.sourceNotesHeading)) {
+      return;
+    }
+
+    const withInsertedBlock = insertBlockUnderHeading(
+      content,
+      this.settings.reviews.sourceNotesHeading,
+      block
+    );
+
+    if (withInsertedBlock !== content) {
+      await this.app.vault.modify(file, withInsertedBlock);
+    }
+  }
+
+  getAutomaticFrontmatter(journalType: JournalType, now = moment()): Record<string, string> {
+    const context = this.getTodayContext(now);
+    const automatic = this.settings.automaticProperties;
+    const frontmatter: Record<string, string> = {};
+
+    assignFrontmatterProperty(frontmatter, automatic.type, journalType);
+    assignFrontmatterProperty(frontmatter, automatic.date, context.date);
+    assignFrontmatterProperty(frontmatter, automatic.time, context.time);
+    assignFrontmatterProperty(frontmatter, automatic.weekday, context.weekday);
+    assignFrontmatterProperty(frontmatter, automatic.week, context.week);
+    assignFrontmatterProperty(frontmatter, automatic.month, context.month);
+    assignFrontmatterProperty(frontmatter, automatic.year, context.year);
+
+    return frontmatter;
+  }
+
+  createReviewBaseBlock(level: ReviewLevel, now = moment()): string[] {
+    const context = this.getTodayContext(now);
+    const automatic = this.settings.automaticProperties;
+    const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
+    const weekProperty = automatic.week.trim() || DEFAULT_SETTINGS.automaticProperties.week;
+    const monthProperty = automatic.month.trim() || DEFAULT_SETTINGS.automaticProperties.month;
+    const yearProperty = automatic.year.trim() || DEFAULT_SETTINGS.automaticProperties.year;
+    const period =
+      level === "weekly"
+        ? { property: weekProperty, value: context.week }
+        : level === "monthly"
+          ? { property: monthProperty, value: context.month }
+          : { property: yearProperty, value: context.year };
+    const columns = dedupeProperties([
+      "file.name",
+      automatic.date,
+      automatic.weekday,
+      automatic.time,
+      weekProperty,
+      monthProperty,
+      yearProperty,
+      ...this.getEnabledProperties().map((property) => property.property),
+    ]);
+
+    return [
+      REVIEW_BASE_START,
+      "```base",
+      "filters:",
+      "  and:",
+      `    - ${formatBasePropertyReference(typeProperty)} == ${formatBaseString("daily")}`,
+      `    - ${formatBasePropertyReference(period.property)} == ${formatBaseString(period.value)}`,
+      "views:",
+      "  - type: table",
+      `    name: Daily notes in this ${reviewPeriodLabel(level)}`,
+      "    order:",
+      ...columns.map((property) => `      - ${formatBasePropertyReference(property)}`),
+      "```",
+      REVIEW_BASE_END,
+    ];
   }
 
   async appendShortCapture(file: TFile, values: JournalValue[]): Promise<void> {
@@ -1236,6 +1363,22 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
+    this.addTextSetting(section, "Type", this.plugin.settings.automaticProperties.type, async (value) => {
+      this.plugin.settings.automaticProperties.type = value || DEFAULT_SETTINGS.automaticProperties.type;
+      await this.plugin.saveSettings();
+    });
+    this.addTextSetting(section, "ISO week", this.plugin.settings.automaticProperties.week, async (value) => {
+      this.plugin.settings.automaticProperties.week = value || DEFAULT_SETTINGS.automaticProperties.week;
+      await this.plugin.saveSettings();
+    });
+    this.addTextSetting(section, "Month", this.plugin.settings.automaticProperties.month, async (value) => {
+      this.plugin.settings.automaticProperties.month = value || DEFAULT_SETTINGS.automaticProperties.month;
+      await this.plugin.saveSettings();
+    });
+    this.addTextSetting(section, "Year", this.plugin.settings.automaticProperties.year, async (value) => {
+      this.plugin.settings.automaticProperties.year = value || DEFAULT_SETTINGS.automaticProperties.year;
+      await this.plugin.saveSettings();
+    });
   }
 
   private renderPropertyRow(containerEl: HTMLElement, property: JournalPropertyDefinition): void {
@@ -1622,6 +1765,22 @@ function migrateLegacySettings(saved: Record<string, unknown>): Record<string, u
         typeof automatic.journalWeekdayProperty === "string"
           ? automatic.journalWeekdayProperty
           : DEFAULT_SETTINGS.automaticProperties.weekday,
+      type:
+        typeof automatic.journalTypeProperty === "string"
+          ? automatic.journalTypeProperty
+          : DEFAULT_SETTINGS.automaticProperties.type,
+      week:
+        typeof automatic.journalWeekProperty === "string"
+          ? automatic.journalWeekProperty
+          : DEFAULT_SETTINGS.automaticProperties.week,
+      month:
+        typeof automatic.journalMonthProperty === "string"
+          ? automatic.journalMonthProperty
+          : DEFAULT_SETTINGS.automaticProperties.month,
+      year:
+        typeof automatic.journalYearProperty === "string"
+          ? automatic.journalYearProperty
+          : DEFAULT_SETTINGS.automaticProperties.year,
     },
   };
 }
@@ -1642,6 +1801,68 @@ function normalizePropertyDefinitions(
           : defaultProperty?.placeholder ?? "",
     };
   });
+}
+
+function assignFrontmatterProperty(
+  frontmatter: Record<string, string>,
+  property: string,
+  value: string
+): void {
+  const key = property.trim();
+  if (key.length > 0) {
+    frontmatter[key] = value;
+  }
+}
+
+function formatFrontmatterBlock(frontmatter: Record<string, string>): string {
+  const lines = Object.entries(frontmatter)
+    .filter(([property]) => property.trim().length > 0)
+    .map(([property, value]) => `${formatYamlKey(property)}: ${formatYamlString(value)}`);
+
+  return lines.length > 0 ? `---\n${lines.join("\n")}\n---\n\n` : "";
+}
+
+function formatYamlKey(property: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(property) ? property : JSON.stringify(property);
+}
+
+function formatYamlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function dedupeProperties(properties: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const property of properties) {
+    const clean = property.trim();
+    const key = clean.toLowerCase();
+    if (clean.length === 0 || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(clean);
+  }
+
+  return deduped;
+}
+
+function formatBasePropertyReference(property: string): string {
+  const clean = property.trim();
+  if (clean === "file.name" || /^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) {
+    return clean;
+  }
+
+  return `note[${formatBaseString(clean)}]`;
+}
+
+function formatBaseString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function reviewPeriodLabel(level: ReviewLevel): string {
+  return level === "weekly" ? "week" : level === "monthly" ? "month" : "year";
 }
 
 function toFrontmatterValue(
@@ -1680,6 +1901,56 @@ function insertUnderHeading(content: string, heading: string, line: string): str
   const before = content.slice(0, insertAt).trimEnd();
   const after = content.slice(insertAt);
   return `${before}\n${line}\n${after}`;
+}
+
+function replaceManagedBlock(
+  content: string,
+  startMarker: string,
+  endMarker: string,
+  replacement: string
+): string | null {
+  const startIndex = content.indexOf(startMarker);
+  if (startIndex === -1) {
+    return null;
+  }
+
+  const endIndex = content.indexOf(endMarker, startIndex + startMarker.length);
+  if (endIndex === -1) {
+    return null;
+  }
+
+  return `${content.slice(0, startIndex)}${replacement}${content.slice(endIndex + endMarker.length)}`;
+}
+
+function insertBlockUnderHeading(content: string, heading: string, block: string): string {
+  const cleanHeading = heading.trim();
+  if (cleanHeading.length === 0) {
+    return content;
+  }
+
+  const headingMatch = findHeadingLine(content, cleanHeading);
+  if (!headingMatch) {
+    return `${content.trimEnd()}\n\n## ${cleanHeading}\n\n${block}\n`;
+  }
+
+  const before = content.slice(0, headingMatch.end).trimEnd();
+  const after = content.slice(headingMatch.end).trimStart();
+  return after.length > 0 ? `${before}\n\n${block}\n\n${after}` : `${before}\n\n${block}\n`;
+}
+
+function sectionContainsBaseBlock(content: string, heading: string): boolean {
+  const cleanHeading = heading.trim();
+  if (cleanHeading.length === 0) {
+    return false;
+  }
+
+  const headingMatch = findHeadingLine(content, cleanHeading);
+  if (!headingMatch) {
+    return false;
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  return content.slice(headingMatch.end, sectionEnd).includes("```base");
 }
 
 function extractNormalizedCaptureEntries(content: string, heading: string): Set<string> {
