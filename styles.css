@@ -75,11 +75,38 @@
   margin-bottom: 10px;
 }
 
+.journaling-system-review-property-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .journaling-system-property-row {
   align-items: center;
   display: grid;
   gap: 8px;
   grid-template-columns: 24px minmax(120px, 1fr) minmax(130px, 1fr) minmax(130px, 1fr) minmax(115px, 0.9fr) 64px 64px 72px;
+}
+
+.journaling-system-review-property-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(130px, 1fr) minmax(115px, 0.8fr) minmax(220px, 1.2fr) 72px;
+}
+
+.journaling-system-review-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.journaling-system-review-levels label {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .journaling-system-property-input,
@@ -96,8 +123,22 @@
   resize: vertical;
 }
 
+.journaling-system-checklist-textarea {
+  min-height: 96px;
+  resize: vertical;
+  width: min(420px, 100%);
+}
+
 .journaling-system-remove-property:disabled {
   visibility: hidden;
+}
+
+.journaling-system-review-level-row {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(160px, 1fr) minmax(240px, 2fr);
+  padding: 8px 0;
 }
 
 .journaling-system-base-property-table {

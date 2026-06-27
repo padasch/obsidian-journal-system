@@ -40,6 +40,7 @@ type ReviewLevel = "weekly" | "monthly" | "annual";
 type JournalType = "daily" | ReviewLevel;
 type BaseRowHeight = "default" | "short" | "medium" | "tall";
 type BaseColumnSizes = Record<string, number>;
+type BasePropertyListKey = "baseProperties" | "reviewBaseProperties";
 
 interface JournalPropertyDefinition {
   id: string;
@@ -51,6 +52,17 @@ interface JournalPropertyDefinition {
   role: JournalPropertyRole;
   min?: number;
   max?: number;
+  builtIn?: boolean;
+}
+
+interface ReviewPropertyDefinition {
+  id: string;
+  enabled: boolean;
+  label: string;
+  property: string;
+  placeholder: string;
+  type: JournalPropertyType;
+  levels: ReviewLevel[];
   builtIn?: boolean;
 }
 
@@ -112,12 +124,20 @@ interface JournalingSystemSettings {
     includeManagedRollupBlock: boolean;
     includeInlineBases: boolean;
     includeLongEntryEmbeds: boolean;
+    includeReviewChecklist: boolean;
+    includeDailyBaseOnHigherReviews: boolean;
+    longEntryEmbedLevels: Record<ReviewLevel, boolean>;
     reflectionHeading: string;
     rollupHeading: string;
     sourceNotesHeading: string;
+    checklistHeading: string;
+    longEntriesHeading: string;
     baseProperties: string[];
+    reviewBaseProperties: string[];
     baseRowHeight: BaseRowHeight;
     baseColumnSizes: BaseColumnSizes;
+    reviewProperties: ReviewPropertyDefinition[];
+    checklistItems: Record<ReviewLevel, string[]>;
   };
 }
 
@@ -126,7 +146,7 @@ interface JournalValue {
   value: string | number | string[] | boolean;
 }
 
-const SETTINGS_SCHEMA_VERSION = 5;
+const SETTINGS_SCHEMA_VERSION = 6;
 const moment = obsidianMoment as unknown as () => Moment;
 
 const WEEKDAYS: Weekday[] = [
@@ -174,18 +194,32 @@ const DEFAULT_REVIEW_BASE_PROPERTIES = [
   "journalYear",
   "journalShort",
   "journalLong",
-  "journalWins",
-  "journalFails",
-  "journalTopics",
   "journalLocation",
   "journalMood",
 ];
 
+const DEFAULT_REVIEW_SOURCE_BASE_PROPERTIES = [
+  "file.name",
+  "journalWeek",
+  "journalMonth",
+  "journalYear",
+  "journalHighlights",
+  "journalDifficulties",
+  "journalImprovements",
+  "journalLife",
+  "journalWork",
+  "journalThemes",
+];
+
 const DEFAULT_REVIEW_BASE_COLUMN_SIZES: BaseColumnSizes = {
   journalShort: 550,
-  journalFails: 300,
-  journalTopics: 160,
   journalLocation: 120,
+  journalHighlights: 360,
+  journalDifficulties: 360,
+  journalImprovements: 360,
+  journalLife: 320,
+  journalWork: 320,
+  journalThemes: 180,
 };
 
 const REVIEW_BASE_START = "<!-- JOURNALING-SYSTEM:BASE:START -->";
@@ -221,36 +255,6 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
     builtIn: true,
   },
   {
-    id: "journalWins",
-    enabled: true,
-    label: "Wins",
-    property: "journalWins",
-    placeholder: "One win per line",
-    type: "multiselect",
-    role: "wins",
-    builtIn: true,
-  },
-  {
-    id: "journalFails",
-    enabled: true,
-    label: "Fails",
-    property: "journalFails",
-    placeholder: "One fail per line",
-    type: "multiselect",
-    role: "fails",
-    builtIn: true,
-  },
-  {
-    id: "journalTopics",
-    enabled: true,
-    label: "Topics on the mind",
-    property: "journalTopics",
-    placeholder: "One topic per line",
-    type: "multiselect",
-    role: "topics",
-    builtIn: true,
-  },
-  {
     id: "journalLocation",
     enabled: true,
     label: "Location",
@@ -273,6 +277,87 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
     builtIn: true,
   },
 ];
+
+const DEFAULT_REVIEW_PROPERTIES: ReviewPropertyDefinition[] = [
+  {
+    id: "journalHighlights",
+    enabled: true,
+    label: "Highlights",
+    property: "journalHighlights",
+    placeholder: "What stood out positively?",
+    type: "multiselect",
+    levels: ["weekly", "monthly", "annual"],
+    builtIn: true,
+  },
+  {
+    id: "journalDifficulties",
+    enabled: true,
+    label: "Difficulties",
+    property: "journalDifficulties",
+    placeholder: "What was difficult?",
+    type: "multiselect",
+    levels: ["weekly", "monthly", "annual"],
+    builtIn: true,
+  },
+  {
+    id: "journalImprovements",
+    enabled: true,
+    label: "Improvements",
+    property: "journalImprovements",
+    placeholder: "What could be improved?",
+    type: "multiselect",
+    levels: ["weekly", "monthly", "annual"],
+    builtIn: true,
+  },
+  {
+    id: "journalLife",
+    enabled: true,
+    label: "Life",
+    property: "journalLife",
+    placeholder: "Life reflection",
+    type: "text",
+    levels: ["weekly", "monthly", "annual"],
+    builtIn: true,
+  },
+  {
+    id: "journalWork",
+    enabled: true,
+    label: "Work",
+    property: "journalWork",
+    placeholder: "Work reflection",
+    type: "text",
+    levels: ["weekly", "monthly", "annual"],
+    builtIn: true,
+  },
+  {
+    id: "journalThemes",
+    enabled: true,
+    label: "Themes",
+    property: "journalThemes",
+    placeholder: "Recurring themes",
+    type: "multiselect",
+    levels: ["weekly", "monthly", "annual"],
+    builtIn: true,
+  },
+];
+
+const DEFAULT_REVIEW_CHECKLIST_ITEMS: Record<ReviewLevel, string[]> = {
+  weekly: [
+    "Read the daily short entries",
+    "Skim long journal entries",
+    "Identify recurring themes",
+  ],
+  monthly: [
+    "Read the weekly reviews",
+    "Compare themes across weeks",
+    "Open daily notes only where needed",
+  ],
+  annual: [
+    "Read the monthly reviews",
+    "Identify repeated themes and changes",
+    "Open weekly or daily notes only where needed",
+  ],
+};
 
 const DEFAULT_SETTINGS: JournalingSystemSettings = {
   schemaVersion: SETTINGS_SCHEMA_VERSION,
@@ -332,12 +417,24 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     includeManagedRollupBlock: false,
     includeInlineBases: true,
     includeLongEntryEmbeds: true,
+    includeReviewChecklist: true,
+    includeDailyBaseOnHigherReviews: false,
+    longEntryEmbedLevels: {
+      weekly: true,
+      monthly: false,
+      annual: false,
+    },
     reflectionHeading: "Review",
     rollupHeading: "Rollup",
     sourceNotesHeading: "Source Notes",
+    checklistHeading: "Review Checklist",
+    longEntriesHeading: "Long entries",
     baseProperties: [...DEFAULT_REVIEW_BASE_PROPERTIES],
+    reviewBaseProperties: [...DEFAULT_REVIEW_SOURCE_BASE_PROPERTIES],
     baseRowHeight: "tall",
     baseColumnSizes: { ...DEFAULT_REVIEW_BASE_COLUMN_SIZES },
+    reviewProperties: DEFAULT_REVIEW_PROPERTIES.map((property) => ({ ...property })),
+    checklistItems: cloneChecklistItems(DEFAULT_REVIEW_CHECKLIST_ITEMS),
   },
 };
 
@@ -579,7 +676,9 @@ export default class JournalingSystemPlugin extends Plugin {
     if (existing) {
       await this.writeReviewProperties(existing, level, now);
       await this.cleanupLegacyReviewScaffolding(existing);
+      await this.ensureReviewChecklist(existing, level);
       await this.ensureReviewBaseBlock(existing, level, now);
+      await this.ensureHigherReviewDailyBaseBlock(existing, level, now);
       await this.ensureReviewLongEntryEmbeds(existing, level, now);
       return existing;
     }
@@ -600,9 +699,16 @@ export default class JournalingSystemPlugin extends Plugin {
     const lines = [
       `# ${title}`,
       "",
-      `## ${this.settings.reviews.reflectionHeading}`,
-      "",
     ];
+
+    if (this.settings.reviews.includeReviewChecklist) {
+      lines.push(
+        `## ${this.settings.reviews.checklistHeading}`,
+        "",
+        ...this.createReviewChecklistBlock(level),
+        ""
+      );
+    }
 
     if (this.settings.reviews.includeInlineBases) {
       lines.push(
@@ -611,13 +717,29 @@ export default class JournalingSystemPlugin extends Plugin {
         ...this.createReviewBaseBlock(level, now),
         ""
       );
+
+      if (this.shouldIncludeHigherReviewDailyBase(level)) {
+        lines.push(
+          "## Daily Notes",
+          "",
+          ...this.createDailySourceBaseBlock(level, now),
+          ""
+        );
+      }
     }
 
-    if (this.settings.reviews.includeLongEntryEmbeds) {
-      lines.push("## Long entries", "", ...this.createLongEntryEmbedsBlock(level, now), "");
+    if (this.shouldIncludeLongEntryEmbeds(level)) {
+      lines.push(
+        `## ${this.settings.reviews.longEntriesHeading}`,
+        "",
+        ...this.createLongEntryEmbedsBlock(level, now),
+        ""
+      );
     }
 
-    return `${formatFrontmatterBlock(this.getAutomaticFrontmatter(level, now))}${lines.join("\n")}`;
+    lines.push(`## ${this.settings.reviews.reflectionHeading}`, "");
+
+    return `${formatFrontmatterBlock(this.getReviewFrontmatter(level, now))}${lines.join("\n")}`;
   }
 
   async writeJournalProperties(file: TFile, values: JournalValue[]): Promise<void> {
@@ -647,10 +769,20 @@ export default class JournalingSystemPlugin extends Plugin {
 
   async writeReviewProperties(file: TFile, level: ReviewLevel, now = moment()): Promise<void> {
     const automaticFrontmatter = this.getAutomaticFrontmatter(level, now);
+    const reviewProperties = this.getReviewProperties(level);
 
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       for (const [property, value] of Object.entries(automaticFrontmatter)) {
         frontmatter[property] = value;
+      }
+
+      for (const property of reviewProperties) {
+        const key = property.property.trim();
+        if (key.length === 0 || frontmatter[key] !== undefined) {
+          continue;
+        }
+
+        frontmatter[key] = emptyReviewPropertyValue(property);
       }
     });
   }
@@ -711,8 +843,41 @@ export default class JournalingSystemPlugin extends Plugin {
     }
   }
 
+  async ensureHigherReviewDailyBaseBlock(
+    file: TFile,
+    level: ReviewLevel,
+    now = moment()
+  ): Promise<void> {
+    if (
+      !this.settings.reviews.includeInlineBases ||
+      !this.shouldIncludeHigherReviewDailyBase(level)
+    ) {
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+    const block = this.createDailySourceBaseBlock(level, now).join("\n");
+    const heading = "Daily Notes";
+    const updated = replaceGeneratedBaseBlockInSection(content, heading, block);
+
+    if (updated && updated !== content) {
+      await this.app.vault.modify(file, updated);
+      return;
+    }
+
+    if (sectionContainsBaseBlock(content, heading)) {
+      return;
+    }
+
+    const withInsertedBlock = insertBlockUnderHeading(content, heading, block);
+
+    if (withInsertedBlock !== content) {
+      await this.app.vault.modify(file, withInsertedBlock);
+    }
+  }
+
   async ensureReviewLongEntryEmbeds(file: TFile, level: ReviewLevel, now = moment()): Promise<void> {
-    if (!this.settings.reviews.includeLongEntryEmbeds) {
+    if (!this.shouldIncludeLongEntryEmbeds(level)) {
       return;
     }
 
@@ -735,7 +900,7 @@ export default class JournalingSystemPlugin extends Plugin {
 
     const withGeneratedSection = replaceGeneratedLongEntriesInSection(
       content,
-      "Long entries",
+      this.settings.reviews.longEntriesHeading,
       block
     );
 
@@ -744,10 +909,37 @@ export default class JournalingSystemPlugin extends Plugin {
       return;
     }
 
-    const withInsertedBlock = insertBlockUnderHeading(content, "Long entries", block);
+    const withInsertedBlock = insertBlockUnderHeading(
+      content,
+      this.settings.reviews.longEntriesHeading,
+      block
+    );
 
     if (withInsertedBlock !== content) {
       await this.app.vault.modify(file, withInsertedBlock);
+    }
+  }
+
+  async ensureReviewChecklist(file: TFile, level: ReviewLevel): Promise<void> {
+    if (!this.settings.reviews.includeReviewChecklist) {
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+    const heading = this.settings.reviews.checklistHeading;
+    if (sectionExists(content, heading)) {
+      return;
+    }
+
+    const section = [
+      `## ${heading}`,
+      "",
+      ...this.createReviewChecklistBlock(level),
+    ].join("\n");
+    const updated = insertSectionAfterTitle(content, section);
+
+    if (updated !== content) {
+      await this.app.vault.modify(file, updated);
     }
   }
 
@@ -767,20 +959,38 @@ export default class JournalingSystemPlugin extends Plugin {
     return frontmatter;
   }
 
+  getReviewFrontmatter(level: ReviewLevel, now = moment()): Record<string, unknown> {
+    const frontmatter: Record<string, unknown> = {
+      ...this.getAutomaticFrontmatter(level, now),
+    };
+
+    for (const property of this.getReviewProperties(level)) {
+      const key = property.property.trim();
+      if (key.length > 0 && frontmatter[key] === undefined) {
+        frontmatter[key] = emptyReviewPropertyValue(property);
+      }
+    }
+
+    return frontmatter;
+  }
+
+  createReviewChecklistBlock(level: ReviewLevel): string[] {
+    const configuredItems = normalizeChecklistItems(
+      this.settings.reviews.checklistItems[level]
+    );
+    const propertyItems = this.getReviewProperties(level).map(
+      (property) => `Fill ${property.property}`
+    );
+
+    return [...configuredItems, ...propertyItems].map((item) => `- [ ] ${item}`);
+  }
+
   createReviewBaseBlock(level: ReviewLevel, now = moment()): string[] {
-    const context = this.getTodayContext(now);
-    const automatic = this.settings.automaticProperties;
-    const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
-    const weekProperty = automatic.week.trim() || DEFAULT_SETTINGS.automaticProperties.week;
-    const monthProperty = automatic.month.trim() || DEFAULT_SETTINGS.automaticProperties.month;
-    const yearProperty = automatic.year.trim() || DEFAULT_SETTINGS.automaticProperties.year;
-    const period =
-      level === "weekly"
-        ? { property: weekProperty, value: context.week }
-        : level === "monthly"
-          ? { property: monthProperty, value: context.month }
-          : { property: yearProperty, value: context.year };
-    const columns = this.getReviewBaseProperties();
+    const source = this.getReviewSource(level, now);
+    const typeProperty =
+      this.settings.automaticProperties.type.trim() ||
+      DEFAULT_SETTINGS.automaticProperties.type;
+    const columns = this.getReviewBaseProperties(level);
     const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
     const columnSizes = this.getReviewBaseColumnSizes(columns);
 
@@ -788,11 +998,11 @@ export default class JournalingSystemPlugin extends Plugin {
       "```base",
       "filters:",
       "  and:",
-      `    - ${formatBasePropertyReference(typeProperty)} == ${formatBaseString("daily")}`,
-      `    - ${formatBasePropertyReference(period.property)} == ${formatBaseString(period.value)}`,
+      `    - ${formatBasePropertyReference(typeProperty)} == ${formatBaseString(source.journalType)}`,
+      `    - ${formatBasePropertyReference(source.period.property)} == ${formatBaseString(source.period.value)}`,
       "views:",
       "  - type: table",
-      `    name: Daily notes in this ${reviewPeriodLabel(level)}`,
+      `    name: ${source.name}`,
       ...(rowHeight === "default" ? [] : [`    rowHeight: ${rowHeight}`]),
       ...(columnSizes.length > 0
         ? [
@@ -810,6 +1020,130 @@ export default class JournalingSystemPlugin extends Plugin {
         : []),
       "```",
     ];
+  }
+
+  createDailySourceBaseBlock(level: ReviewLevel, now = moment()): string[] {
+    const source = this.getDailySourceForReview(level, now);
+    const typeProperty =
+      this.settings.automaticProperties.type.trim() ||
+      DEFAULT_SETTINGS.automaticProperties.type;
+    const columns = normalizeBaseProperties(this.settings.reviews.baseProperties);
+    const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
+    const columnSizes = this.getReviewBaseColumnSizes(columns);
+
+    return [
+      "```base",
+      "filters:",
+      "  and:",
+      `    - ${formatBasePropertyReference(typeProperty)} == ${formatBaseString("daily")}`,
+      `    - ${formatBasePropertyReference(source.period.property)} == ${formatBaseString(source.period.value)}`,
+      "views:",
+      "  - type: table",
+      `    name: ${source.name}`,
+      ...(rowHeight === "default" ? [] : [`    rowHeight: ${rowHeight}`]),
+      ...(columnSizes.length > 0
+        ? [
+            "    columnSize:",
+            ...columnSizes.map(
+              ([property, size]) => `      ${formatBaseColumnSizeKey(property)}: ${size}`
+            ),
+          ]
+        : []),
+      ...(columns.length > 0
+        ? [
+            "    order:",
+            ...columns.map((property) => `      - ${formatBasePropertyReference(property)}`),
+          ]
+        : []),
+      "```",
+    ];
+  }
+
+  getReviewSource(
+    level: ReviewLevel,
+    now = moment()
+  ): {
+    journalType: JournalType;
+    period: { property: string; value: string };
+    name: string;
+  } {
+    const context = this.getTodayContext(now);
+    const automatic = this.settings.automaticProperties;
+    const weekProperty = automatic.week.trim() || DEFAULT_SETTINGS.automaticProperties.week;
+    const monthProperty = automatic.month.trim() || DEFAULT_SETTINGS.automaticProperties.month;
+    const yearProperty = automatic.year.trim() || DEFAULT_SETTINGS.automaticProperties.year;
+
+    if (level === "weekly") {
+      return {
+        journalType: "daily",
+        period: { property: weekProperty, value: context.week },
+        name: "Daily notes in this week",
+      };
+    }
+
+    if (level === "monthly") {
+      return {
+        journalType: "weekly",
+        period: { property: monthProperty, value: context.month },
+        name: "Weekly reviews in this month",
+      };
+    }
+
+    return {
+      journalType: "monthly",
+      period: { property: yearProperty, value: context.year },
+      name: "Monthly reviews in this year",
+    };
+  }
+
+  getDailySourceForReview(
+    level: ReviewLevel,
+    now = moment()
+  ): { period: { property: string; value: string }; name: string } {
+    const context = this.getTodayContext(now);
+    const automatic = this.settings.automaticProperties;
+    const weekProperty = automatic.week.trim() || DEFAULT_SETTINGS.automaticProperties.week;
+    const monthProperty = automatic.month.trim() || DEFAULT_SETTINGS.automaticProperties.month;
+    const yearProperty = automatic.year.trim() || DEFAULT_SETTINGS.automaticProperties.year;
+
+    if (level === "weekly") {
+      return {
+        period: { property: weekProperty, value: context.week },
+        name: "Daily notes in this week",
+      };
+    }
+
+    if (level === "monthly") {
+      return {
+        period: { property: monthProperty, value: context.month },
+        name: "Daily notes in this month",
+      };
+    }
+
+    return {
+      period: { property: yearProperty, value: context.year },
+      name: "Daily notes in this year",
+    };
+  }
+
+  getReviewProperties(level: ReviewLevel): ReviewPropertyDefinition[] {
+    return this.settings.reviews.reviewProperties.filter(
+      (property) =>
+        property.enabled &&
+        property.property.trim().length > 0 &&
+        property.levels.includes(level)
+    );
+  }
+
+  shouldIncludeLongEntryEmbeds(level: ReviewLevel): boolean {
+    return (
+      this.settings.reviews.includeLongEntryEmbeds &&
+      this.settings.reviews.longEntryEmbedLevels[level] === true
+    );
+  }
+
+  shouldIncludeHigherReviewDailyBase(level: ReviewLevel): boolean {
+    return level !== "weekly" && this.settings.reviews.includeDailyBaseOnHigherReviews;
   }
 
   createLongEntryEmbedsBlock(level: ReviewLevel, now = moment()): string[] {
@@ -899,8 +1233,12 @@ export default class JournalingSystemPlugin extends Plugin {
     return { property: yearProperty, value: context.year };
   }
 
-  getReviewBaseProperties(): string[] {
-    return normalizeBaseProperties(this.settings.reviews.baseProperties);
+  getReviewBaseProperties(level: ReviewLevel): string[] {
+    return normalizeBaseProperties(
+      level === "weekly"
+        ? this.settings.reviews.baseProperties
+        : this.settings.reviews.reviewBaseProperties
+    );
   }
 
   getReviewBaseColumnSizes(columns: string[]): Array<[string, number]> {
@@ -912,8 +1250,8 @@ export default class JournalingSystemPlugin extends Plugin {
     });
   }
 
-  getAvailableBaseProperties(): string[] {
-    return getAvailableBasePropertiesFromSettings(this.settings);
+  getAvailableBaseProperties(kind: "daily" | "review"): string[] {
+    return getAvailableBasePropertiesFromSettings(this.settings, kind);
   }
 
   async appendShortCapture(file: TFile, values: JournalValue[]): Promise<void> {
@@ -1539,10 +1877,10 @@ class JournalingSystemSettingTab extends PluginSettingTab {
   }
 
   private displayPropertySettings(containerEl: HTMLElement): void {
-    const section = createSettingsSection(containerEl, "Properties");
+    const section = createSettingsSection(containerEl, "Daily properties");
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "These definitions control the journal modal and the frontmatter properties written to daily notes.",
+      text: "These definitions control the daily journal modal. Keep this light: daily notes are raw signal.",
     });
 
     const list = section.createDiv({ cls: "journaling-system-property-list" });
@@ -1720,15 +2058,80 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       }
     );
 
+    section.createEl("h3", { text: "Review workspace" });
+    this.addToggleSetting(section, "Review checklist", "includeReviewChecklist");
+    this.addTextSetting(
+      section,
+      "Checklist heading",
+      this.plugin.settings.reviews.checklistHeading,
+      async (value) => {
+        this.plugin.settings.reviews.checklistHeading =
+          value || DEFAULT_SETTINGS.reviews.checklistHeading;
+        await this.plugin.saveSettings();
+      }
+    );
+    this.renderChecklistSettings(section);
+
     this.addToggleSetting(section, "Inline Bases", "includeInlineBases");
     this.addToggleSetting(section, "Long-entry embeds", "includeLongEntryEmbeds");
+    this.renderLongEntryLevelSettings(section);
+    this.addToggleSetting(
+      section,
+      "Daily Base in monthly/annual",
+      "includeDailyBaseOnHigherReviews"
+    );
 
-    section.createEl("h3", { text: "Base columns" });
+    section.createEl("h3", { text: "Review properties" });
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "Choose which properties appear in generated review Bases and set optional column widths in pixels.",
+      text: "These properties are added to review notes and become the condensation layer above daily writing.",
     });
-    this.renderBasePropertyTable(section);
+    const reviewPropertyList = section.createDiv({
+      cls: "journaling-system-review-property-list",
+    });
+    for (const property of this.plugin.settings.reviews.reviewProperties) {
+      this.renderReviewPropertyRow(reviewPropertyList, property);
+    }
+    new Setting(section).addButton((button) => {
+      button
+        .setButtonText("Add review property")
+        .setCta()
+        .onClick(async () => {
+          this.plugin.settings.reviews.reviewProperties.push({
+            id: `review-custom-${Date.now()}`,
+            enabled: true,
+            label: "New review property",
+            property: "journalReviewCustom",
+            placeholder: "",
+            type: "text",
+            levels: ["weekly", "monthly", "annual"],
+          });
+          await this.plugin.saveSettings();
+          this.display();
+        });
+    });
+
+    section.createEl("h3", { text: "Daily source Base columns" });
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Used by weekly reviews and by the optional daily Base in monthly or annual reviews.",
+    });
+    this.renderBasePropertyTable(
+      section,
+      "baseProperties",
+      this.plugin.getAvailableBaseProperties("daily")
+    );
+
+    section.createEl("h3", { text: "Review source Base columns" });
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Used when monthly reviews show weekly reviews and annual reviews show monthly reviews.",
+    });
+    this.renderBasePropertyTable(
+      section,
+      "reviewBaseProperties",
+      this.plugin.getAvailableBaseProperties("review")
+    );
 
     new Setting(section)
       .setName("Base row height")
@@ -1767,9 +2170,147 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
+    this.addTextSetting(
+      section,
+      "Long entries heading",
+      this.plugin.settings.reviews.longEntriesHeading,
+      async (value) => {
+        this.plugin.settings.reviews.longEntriesHeading =
+          value || DEFAULT_SETTINGS.reviews.longEntriesHeading;
+        await this.plugin.saveSettings();
+      }
+    );
   }
 
-  private renderBasePropertyTable(containerEl: HTMLElement): void {
+  private renderChecklistSettings(containerEl: HTMLElement): void {
+    const labels: Record<ReviewLevel, string> = {
+      weekly: "Weekly checklist prompts",
+      monthly: "Monthly checklist prompts",
+      annual: "Annual checklist prompts",
+    };
+
+    for (const level of REVIEW_LEVELS) {
+      new Setting(containerEl)
+        .setName(labels[level])
+        .setDesc("One process item per line. Property fill-in items are added automatically.")
+        .addTextArea((textarea) => {
+          textarea
+            .setValue(this.plugin.settings.reviews.checklistItems[level].join("\n"))
+            .onChange(async (value) => {
+              this.plugin.settings.reviews.checklistItems[level] =
+                normalizeChecklistItems(value);
+              await this.plugin.saveSettings();
+            });
+          textarea.inputEl.addClass("journaling-system-checklist-textarea");
+        });
+    }
+  }
+
+  private renderLongEntryLevelSettings(containerEl: HTMLElement): void {
+    const row = containerEl.createDiv({ cls: "journaling-system-review-level-row" });
+    row.createDiv({ cls: "journaling-system-setting-label", text: "Long-entry levels" });
+    const levels = row.createDiv({ cls: "journaling-system-weekday-grid" });
+
+    for (const level of REVIEW_LEVELS) {
+      const active = this.plugin.settings.reviews.longEntryEmbedLevels[level] === true;
+      const button = levels.createEl("button", {
+        text: capitalize(level),
+        cls: active ? "journaling-system-weekday is-active" : "journaling-system-weekday",
+      });
+      button.type = "button";
+      button.addEventListener("click", async () => {
+        this.plugin.settings.reviews.longEntryEmbedLevels[level] = !active;
+        await this.plugin.saveSettings();
+        this.display();
+      });
+    }
+  }
+
+  private renderReviewPropertyRow(
+    containerEl: HTMLElement,
+    property: ReviewPropertyDefinition
+  ): void {
+    const row = containerEl.createDiv({ cls: "journaling-system-review-property-row" });
+    const enabled = row.createEl("input", { type: "checkbox" });
+    enabled.checked = property.enabled;
+    enabled.ariaLabel = `Enable ${property.label}`;
+    enabled.addEventListener("change", async () => {
+      property.enabled = enabled.checked;
+      await this.plugin.saveSettings();
+    });
+
+    const label = row.createEl("input", {
+      type: "text",
+      value: property.label,
+      cls: "journaling-system-property-input",
+    });
+    label.ariaLabel = "Review field label";
+    label.addEventListener("change", async () => {
+      property.label = label.value.trim() || property.label;
+      await this.plugin.saveSettings();
+    });
+
+    const propertyName = row.createEl("input", {
+      type: "text",
+      value: property.property,
+      cls: "journaling-system-property-input",
+    });
+    propertyName.ariaLabel = "Review property name";
+    propertyName.addEventListener("change", async () => {
+      property.property = propertyName.value.trim() || property.property;
+      await this.plugin.saveSettings();
+    });
+
+    const type = row.createEl("select", { cls: "journaling-system-property-select" });
+    for (const [value, labelText] of Object.entries(PROPERTY_TYPE_LABELS)) {
+      type.createEl("option", { text: labelText, value });
+    }
+    type.value = property.type;
+    type.addEventListener("change", async () => {
+      property.type = type.value as JournalPropertyType;
+      await this.plugin.saveSettings();
+    });
+
+    const levels = row.createDiv({ cls: "journaling-system-review-levels" });
+    for (const level of REVIEW_LEVELS) {
+      const labelEl = levels.createEl("label");
+      const checkbox = labelEl.createEl("input", { type: "checkbox" });
+      checkbox.checked = property.levels.includes(level);
+      checkbox.addEventListener("change", async () => {
+        const selected = new Set(property.levels);
+        if (checkbox.checked) {
+          selected.add(level);
+        } else {
+          selected.delete(level);
+        }
+
+        property.levels = REVIEW_LEVELS.filter((entry) => selected.has(entry));
+        await this.plugin.saveSettings();
+      });
+      labelEl.createSpan({ text: capitalize(level) });
+    }
+
+    const removeButton = row.createEl("button", {
+      text: property.builtIn ? "" : "Remove",
+      cls: "journaling-system-remove-property",
+    });
+    removeButton.type = "button";
+    removeButton.disabled = property.builtIn === true;
+    removeButton.addEventListener("click", async () => {
+      this.plugin.settings.reviews.reviewProperties =
+        this.plugin.settings.reviews.reviewProperties.filter(
+          (definition) => definition.id !== property.id
+        );
+      await this.plugin.saveSettings();
+      this.display();
+    });
+  }
+
+  private renderBasePropertyTable(
+    containerEl: HTMLElement,
+    key: BasePropertyListKey,
+    availableProperties: string[]
+  ): void {
     const table = containerEl.createDiv({ cls: "journaling-system-base-property-table" });
     const header = table.createDiv({
       cls: "journaling-system-base-property-row journaling-system-base-property-header",
@@ -1778,14 +2319,19 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     header.createDiv({ text: "Property" });
     header.createDiv({ text: "Column width" });
 
-    const selectedProperties = new Set(this.plugin.getReviewBaseProperties());
+    const selectedProperties = new Set(
+      normalizeBaseProperties(this.plugin.settings.reviews[key])
+    );
+    const availablePropertySet = new Set(availableProperties);
     const columnSizes = normalizeBaseColumnSizes(
       this.plugin.settings.reviews.baseColumnSizes
     );
     const rows = dedupeProperties([
-      ...this.plugin.getReviewBaseProperties(),
-      ...this.plugin.getAvailableBaseProperties(),
-      ...Object.keys(columnSizes),
+      ...normalizeBaseProperties(this.plugin.settings.reviews[key]),
+      ...availableProperties,
+      ...Object.keys(columnSizes).filter(
+        (property) => selectedProperties.has(property) || availablePropertySet.has(property)
+      ),
     ]);
 
     for (const property of rows) {
@@ -1794,8 +2340,8 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       checkbox.checked = selectedProperties.has(property);
       checkbox.ariaLabel = `Show ${property} in review Bases`;
       checkbox.addEventListener("change", async () => {
-        const current = this.plugin.getReviewBaseProperties();
-        this.plugin.settings.reviews.baseProperties = checkbox.checked
+        const current = normalizeBaseProperties(this.plugin.settings.reviews[key]);
+        this.plugin.settings.reviews[key] = checkbox.checked
           ? dedupeProperties([...current, property])
           : current.filter((entry) => entry !== property);
         await this.plugin.saveSettings();
@@ -1893,7 +2439,12 @@ class JournalingSystemSettingTab extends PluginSettingTab {
   private addToggleSetting(
     containerEl: HTMLElement,
     name: string,
-    key: "includeManagedRollupBlock" | "includeInlineBases" | "includeLongEntryEmbeds"
+    key:
+      | "includeManagedRollupBlock"
+      | "includeInlineBases"
+      | "includeLongEntryEmbeds"
+      | "includeReviewChecklist"
+      | "includeDailyBaseOnHigherReviews"
   ): void {
     new Setting(containerEl).setName(name).addToggle((toggle) => {
       toggle.setValue(this.plugin.settings.reviews[key]).onChange(async (value) => {
@@ -2008,15 +2559,32 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   const savedSchemaVersion = getSavedSchemaVersion(migrated);
   const settings = mergeDefaults(defaults, migrated);
   settings.ui.modalFontSizePx = normalizeModalFontSize(settings.ui.modalFontSizePx);
-  settings.properties = normalizePropertyDefinitions(settings.properties);
+  settings.properties = normalizePropertyDefinitions(settings.properties, savedSchemaVersion);
   settings.reviews.baseProperties = normalizeBaseProperties(settings.reviews.baseProperties);
   if (settings.reviews.baseProperties.length === 0 && savedSchemaVersion < 5) {
-    settings.reviews.baseProperties = getAvailableBasePropertiesFromSettings(settings);
+    settings.reviews.baseProperties = getAvailableBasePropertiesFromSettings(settings, "daily");
   }
+  settings.reviews.reviewBaseProperties = normalizeBaseProperties(
+    settings.reviews.reviewBaseProperties
+  );
   settings.reviews.baseRowHeight = normalizeBaseRowHeight(settings.reviews.baseRowHeight);
   settings.reviews.baseColumnSizes = normalizeBaseColumnSizes(
     settings.reviews.baseColumnSizes
   );
+  settings.reviews.reviewProperties = normalizeReviewPropertyDefinitions(
+    settings.reviews.reviewProperties
+  );
+  settings.reviews.checklistItems = normalizeChecklistItemsByLevel(
+    settings.reviews.checklistItems
+  );
+  settings.reviews.longEntryEmbedLevels = normalizeReviewLevelBooleans(
+    settings.reviews.longEntryEmbedLevels,
+    DEFAULT_SETTINGS.reviews.longEntryEmbedLevels
+  );
+  settings.reviews.includeReviewChecklist =
+    settings.reviews.includeReviewChecklist === true;
+  settings.reviews.includeDailyBaseOnHigherReviews =
+    settings.reviews.includeDailyBaseOnHigherReviews === true;
   settings.schemaVersion = SETTINGS_SCHEMA_VERSION;
   return settings;
 }
@@ -2094,25 +2662,36 @@ function migrateLegacySettings(saved: Record<string, unknown>): Record<string, u
 }
 
 function normalizePropertyDefinitions(
-  properties: JournalPropertyDefinition[]
+  properties: JournalPropertyDefinition[],
+  savedSchemaVersion: number
 ): JournalPropertyDefinition[] {
-  return properties.map((property) => {
-    const defaultProperty = DEFAULT_PROPERTIES.find(
-      (definition) => definition.id === property.id
-    );
+  const removedDailyBuiltIns = new Set(["journalWins", "journalFails", "journalTopics"]);
 
-    return {
-      ...property,
-      placeholder:
-        typeof property.placeholder === "string"
-          ? property.placeholder
-          : defaultProperty?.placeholder ?? "",
-    };
-  });
+  return properties
+    .filter((property) => {
+      if (savedSchemaVersion >= 6) {
+        return true;
+      }
+
+      return !(property.builtIn === true && removedDailyBuiltIns.has(property.id));
+    })
+    .map((property) => {
+      const defaultProperty = DEFAULT_PROPERTIES.find(
+        (definition) => definition.id === property.id
+      );
+
+      return {
+        ...property,
+        placeholder:
+          typeof property.placeholder === "string"
+            ? property.placeholder
+            : defaultProperty?.placeholder ?? "",
+      };
+    });
 }
 
 function assignFrontmatterProperty(
-  frontmatter: Record<string, string>,
+  frontmatter: Record<string, unknown>,
   property: string,
   value: string
 ): void {
@@ -2122,10 +2701,10 @@ function assignFrontmatterProperty(
   }
 }
 
-function formatFrontmatterBlock(frontmatter: Record<string, string>): string {
+function formatFrontmatterBlock(frontmatter: Record<string, unknown>): string {
   const lines = Object.entries(frontmatter)
     .filter(([property]) => property.trim().length > 0)
-    .map(([property, value]) => `${formatYamlKey(property)}: ${formatYamlString(value)}`);
+    .map(([property, value]) => `${formatYamlKey(property)}: ${formatYamlValue(value)}`);
 
   return lines.length > 0 ? `---\n${lines.join("\n")}\n---\n\n` : "";
 }
@@ -2134,8 +2713,159 @@ function formatYamlKey(property: string): string {
   return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(property) ? property : JSON.stringify(property);
 }
 
+function formatYamlValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.length > 0
+      ? `[${value.map((entry) => formatYamlString(String(entry))).join(", ")}]`
+      : "[]";
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return formatYamlString(String(value ?? ""));
+}
+
 function formatYamlString(value: string): string {
   return JSON.stringify(value);
+}
+
+function emptyReviewPropertyValue(
+  property: ReviewPropertyDefinition
+): string | number | string[] | boolean {
+  if (property.type === "multiselect") {
+    return [];
+  }
+
+  if (property.type === "checkbox") {
+    return false;
+  }
+
+  if (property.type === "number") {
+    return "";
+  }
+
+  return "";
+}
+
+function normalizeReviewPropertyDefinitions(
+  properties: ReviewPropertyDefinition[]
+): ReviewPropertyDefinition[] {
+  const normalized = new Map<string, ReviewPropertyDefinition>();
+
+  for (const property of Array.isArray(properties) ? properties : []) {
+    const defaultProperty = DEFAULT_REVIEW_PROPERTIES.find(
+      (definition) => definition.id === property.id
+    );
+    normalized.set(property.id, {
+      ...property,
+      enabled:
+        typeof property.enabled === "boolean"
+          ? property.enabled
+          : defaultProperty?.enabled ?? true,
+      label:
+        typeof property.label === "string" && property.label.trim().length > 0
+          ? property.label
+          : defaultProperty?.label ?? property.property,
+      property:
+        typeof property.property === "string" && property.property.trim().length > 0
+          ? property.property
+          : defaultProperty?.property ?? property.id,
+      placeholder:
+        typeof property.placeholder === "string"
+          ? property.placeholder
+          : defaultProperty?.placeholder ?? "",
+      type: normalizeJournalPropertyType(property.type, defaultProperty?.type ?? "text"),
+      levels: normalizeReviewLevels(property.levels, defaultProperty?.levels ?? ["weekly"]),
+      builtIn: property.builtIn ?? defaultProperty?.builtIn,
+    });
+  }
+
+  for (const property of DEFAULT_REVIEW_PROPERTIES) {
+    if (!normalized.has(property.id)) {
+      normalized.set(property.id, { ...property, levels: [...property.levels] });
+    }
+  }
+
+  return Array.from(normalized.values());
+}
+
+function normalizeJournalPropertyType(
+  value: unknown,
+  fallback: JournalPropertyType
+): JournalPropertyType {
+  return value === "text" ||
+    value === "number" ||
+    value === "date" ||
+    value === "multiselect" ||
+    value === "checkbox"
+    ? value
+    : fallback;
+}
+
+function normalizeReviewLevels(value: unknown, fallback: ReviewLevel[]): ReviewLevel[] {
+  const levels = Array.isArray(value)
+    ? value.filter((level): level is ReviewLevel => isReviewLevel(level))
+    : fallback;
+
+  return REVIEW_LEVELS.filter((level) => levels.includes(level));
+}
+
+function normalizeChecklistItemsByLevel(
+  value: unknown
+): Record<ReviewLevel, string[]> {
+  const record = isRecord(value) ? value : {};
+  return {
+    weekly: normalizeChecklistItems(record.weekly ?? DEFAULT_REVIEW_CHECKLIST_ITEMS.weekly),
+    monthly: normalizeChecklistItems(record.monthly ?? DEFAULT_REVIEW_CHECKLIST_ITEMS.monthly),
+    annual: normalizeChecklistItems(record.annual ?? DEFAULT_REVIEW_CHECKLIST_ITEMS.annual),
+  };
+}
+
+function normalizeChecklistItems(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry).trim())
+      .filter((entry) => entry.length > 0);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  }
+
+  return [];
+}
+
+function cloneChecklistItems(
+  value: Record<ReviewLevel, string[]>
+): Record<ReviewLevel, string[]> {
+  return {
+    weekly: [...value.weekly],
+    monthly: [...value.monthly],
+    annual: [...value.annual],
+  };
+}
+
+function normalizeReviewLevelBooleans(
+  value: unknown,
+  fallback: Record<ReviewLevel, boolean>
+): Record<ReviewLevel, boolean> {
+  const record = isRecord(value) ? value : {};
+  return {
+    weekly: typeof record.weekly === "boolean" ? record.weekly : fallback.weekly,
+    monthly: typeof record.monthly === "boolean" ? record.monthly : fallback.monthly,
+    annual: typeof record.annual === "boolean" ? record.annual : fallback.annual,
+  };
+}
+
+const REVIEW_LEVELS: ReviewLevel[] = ["weekly", "monthly", "annual"];
+
+function isReviewLevel(value: unknown): value is ReviewLevel {
+  return value === "weekly" || value === "monthly" || value === "annual";
 }
 
 function dedupeProperties(properties: string[]): string[] {
@@ -2252,7 +2982,8 @@ function formatBaseString(value: string): string {
 }
 
 function getAvailableBasePropertiesFromSettings(
-  settings: JournalingSystemSettings
+  settings: JournalingSystemSettings,
+  kind: "daily" | "review"
 ): string[] {
   const automatic = settings.automaticProperties;
   return dedupeProperties([
@@ -2264,7 +2995,9 @@ function getAvailableBasePropertiesFromSettings(
     automatic.week,
     automatic.month,
     automatic.year,
-    ...settings.properties.map((property) => property.property),
+    ...(kind === "daily"
+      ? settings.properties.map((property) => property.property)
+      : settings.reviews.reviewProperties.map((property) => property.property)),
   ]);
 }
 
@@ -2376,6 +3109,25 @@ function insertBlockUnderHeading(content: string, heading: string, block: string
   return after.length > 0 ? `${before}\n\n${block}\n\n${after}` : `${before}\n\n${block}\n`;
 }
 
+function sectionExists(content: string, heading: string): boolean {
+  return heading.trim().length > 0 && findHeadingLine(content, heading) !== null;
+}
+
+function insertSectionAfterTitle(content: string, section: string): string {
+  const titleMatch = /^#\s+.+$/m.exec(content);
+  if (!titleMatch) {
+    return `${section}\n\n${content.trimStart()}`;
+  }
+
+  const lineEnd = content.indexOf("\n", titleMatch.index);
+  const insertAt = lineEnd === -1 ? content.length : lineEnd + 1;
+  const before = content.slice(0, insertAt).trimEnd();
+  const after = content.slice(insertAt).trimStart();
+  return after.length > 0
+    ? `${before}\n\n${section}\n\n${after}`
+    : `${before}\n\n${section}\n`;
+}
+
 function replaceGeneratedBaseBlockInSection(
   content: string,
   heading: string,
@@ -2398,7 +3150,11 @@ function replaceGeneratedBaseBlockInSection(
     return null;
   }
 
-  if (!/name:\s+(Daily notes in this|Journal source notes)/.test(match[0])) {
+  if (
+    !/name:\s+(Daily notes in this|Weekly reviews in this|Monthly reviews in this|Journal source notes)/.test(
+      match[0]
+    )
+  ) {
     return null;
   }
 
