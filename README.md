@@ -34,7 +34,8 @@ The settings tab already includes controls for:
 - Automatic property names for journal type, date, time, weekday, ISO week,
   month, and year.
 - Weekly, monthly, and annual review schedules.
-- Review content options for managed rollups, inline Bases, and long-entry embeds.
+- Review content options for managed rollups, inline Bases, long-entry embeds,
+  generated Base columns, and Base row height.
 - Folder fields use Obsidian's native fuzzy selection modal for quick selection.
 - Folder fields accept date tokens in braces, for example `journal/{YYYY}`, and show
   the parsed folder underneath the setting.
@@ -58,6 +59,8 @@ Daily and review notes receive `journalType` frontmatter. Daily notes also recei
 period keys such as `journalWeek`, `journalMonth`, and `journalYear`, and generated
 review notes include Bases that filter daily notes to the matching period while
 displaying the configured daily journal properties.
+Review Base columns can be edited as one property per line in settings, with the
+available fields shown below the control.
 
 ## Development
 

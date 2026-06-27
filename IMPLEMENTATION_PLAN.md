@@ -69,7 +69,8 @@ Settings tab:
 - Custom user-defined properties using text, number, date, multi-select, or checkbox
   types.
 - Weekly, monthly, and annual review schedule settings.
-- Review content options for managed rollups, inline Bases, and long-entry embeds.
+- Review content options for managed rollups, inline Bases, long-entry embeds,
+  generated Base columns, and Base row height.
 
 ## Product Direction
 

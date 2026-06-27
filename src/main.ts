@@ -38,6 +38,7 @@ type JournalPropertyRole =
 type RollupSource = "hybrid-hierarchy" | "daily-notes" | "prior-reviews";
 type ReviewLevel = "weekly" | "monthly" | "annual";
 type JournalType = "daily" | ReviewLevel;
+type BaseRowHeight = "default" | "short" | "medium" | "tall";
 
 interface JournalPropertyDefinition {
   id: string;
@@ -113,6 +114,8 @@ interface JournalingSystemSettings {
     reflectionHeading: string;
     rollupHeading: string;
     sourceNotesHeading: string;
+    baseProperties: string[];
+    baseRowHeight: BaseRowHeight;
   };
 }
 
@@ -121,7 +124,7 @@ interface JournalValue {
   value: string | number | string[] | boolean;
 }
 
-const SETTINGS_SCHEMA_VERSION = 3;
+const SETTINGS_SCHEMA_VERSION = 4;
 const moment = obsidianMoment as unknown as () => Moment;
 
 const WEEKDAYS: Weekday[] = [
@@ -157,6 +160,30 @@ const ROLLUP_SOURCE_LABELS: Record<RollupSource, string> = {
   "daily-notes": "Daily notes only",
   "prior-reviews": "Prior reviews",
 };
+
+const BASE_ROW_HEIGHT_LABELS: Record<BaseRowHeight, string> = {
+  default: "Default",
+  short: "Short",
+  medium: "Medium",
+  tall: "Tall",
+};
+
+const DEFAULT_REVIEW_BASE_PROPERTIES = [
+  "file.name",
+  "journalDate",
+  "journalWeekday",
+  "journalTime",
+  "journalWeek",
+  "journalMonth",
+  "journalYear",
+  "journalShort",
+  "journalLong",
+  "journalWins",
+  "journalFails",
+  "journalTopics",
+  "journalLocation",
+  "journalMood",
+];
 
 const REVIEW_BASE_START = "<!-- JOURNALING-SYSTEM:BASE:START -->";
 const REVIEW_BASE_END = "<!-- JOURNALING-SYSTEM:BASE:END -->";
@@ -299,6 +326,8 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     reflectionHeading: "Review",
     rollupHeading: "Rollup",
     sourceNotesHeading: "Source Notes",
+    baseProperties: [...DEFAULT_REVIEW_BASE_PROPERTIES],
+    baseRowHeight: "tall",
   },
 };
 
@@ -692,16 +721,8 @@ export default class JournalingSystemPlugin extends Plugin {
         : level === "monthly"
           ? { property: monthProperty, value: context.month }
           : { property: yearProperty, value: context.year };
-    const columns = dedupeProperties([
-      "file.name",
-      automatic.date,
-      automatic.weekday,
-      automatic.time,
-      weekProperty,
-      monthProperty,
-      yearProperty,
-      ...this.getEnabledProperties().map((property) => property.property),
-    ]);
+    const columns = this.getReviewBaseProperties();
+    const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
 
     return [
       REVIEW_BASE_START,
@@ -713,11 +734,32 @@ export default class JournalingSystemPlugin extends Plugin {
       "views:",
       "  - type: table",
       `    name: Daily notes in this ${reviewPeriodLabel(level)}`,
+      ...(rowHeight === "default" ? [] : [`    rowHeight: ${rowHeight}`]),
       "    order:",
       ...columns.map((property) => `      - ${formatBasePropertyReference(property)}`),
       "```",
       REVIEW_BASE_END,
     ];
+  }
+
+  getReviewBaseProperties(): string[] {
+    const configured = normalizeBaseProperties(this.settings.reviews.baseProperties);
+    return configured.length > 0 ? configured : this.getAvailableBaseProperties();
+  }
+
+  getAvailableBaseProperties(): string[] {
+    const automatic = this.settings.automaticProperties;
+    return dedupeProperties([
+      "file.name",
+      automatic.type,
+      automatic.date,
+      automatic.weekday,
+      automatic.time,
+      automatic.week,
+      automatic.month,
+      automatic.year,
+      ...this.settings.properties.map((property) => property.property),
+    ]);
   }
 
   async appendShortCapture(file: TFile, values: JournalValue[]): Promise<void> {
@@ -1540,6 +1582,37 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addToggleSetting(section, "Inline Bases", "includeInlineBases");
     this.addToggleSetting(section, "Long-entry embeds", "includeLongEntryEmbeds");
 
+    const basePropertiesSetting = new Setting(section)
+      .setName("Base properties")
+      .setDesc("One property per line. Leave empty to show all available journal fields.");
+    basePropertiesSetting.addTextArea((textarea) => {
+      textarea
+        .setPlaceholder(this.plugin.getAvailableBaseProperties().join("\n"))
+        .setValue(this.plugin.settings.reviews.baseProperties.join("\n"))
+        .onChange(async (value) => {
+          this.plugin.settings.reviews.baseProperties = parseLineList(value);
+          await this.plugin.saveSettings();
+        });
+      textarea.inputEl.addClass("journaling-system-base-properties-textarea");
+    });
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: `Available fields: ${this.plugin.getAvailableBaseProperties().join(", ")}`,
+    });
+
+    new Setting(section)
+      .setName("Base row height")
+      .setDesc("Controls row height for generated review Bases.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOptions(BASE_ROW_HEIGHT_LABELS)
+          .setValue(normalizeBaseRowHeight(this.plugin.settings.reviews.baseRowHeight))
+          .onChange(async (value) => {
+            this.plugin.settings.reviews.baseRowHeight = normalizeBaseRowHeight(value);
+            await this.plugin.saveSettings();
+          });
+      });
+
     this.addTextSetting(
       section,
       "Reflection heading",
@@ -1745,6 +1818,8 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   const migrated = migrateLegacySettings(saved);
   const settings = mergeDefaults(defaults, migrated);
   settings.ui.modalFontSizePx = normalizeModalFontSize(settings.ui.modalFontSizePx);
+  settings.reviews.baseProperties = normalizeBaseProperties(settings.reviews.baseProperties);
+  settings.reviews.baseRowHeight = normalizeBaseRowHeight(settings.reviews.baseRowHeight);
   settings.properties = normalizePropertyDefinitions(settings.properties);
   return settings;
 }
@@ -1876,6 +1951,28 @@ function dedupeProperties(properties: string[]): string[] {
   }
 
   return deduped;
+}
+
+function normalizeBaseProperties(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return dedupeProperties(value.map((entry) => String(entry)));
+  }
+
+  if (typeof value === "string") {
+    return parseLineList(value);
+  }
+
+  return [];
+}
+
+function parseLineList(value: string): string[] {
+  return dedupeProperties(value.split(/\r?\n/));
+}
+
+function normalizeBaseRowHeight(value: unknown): BaseRowHeight {
+  return value === "short" || value === "medium" || value === "tall" || value === "default"
+    ? value
+    : "tall";
 }
 
 function formatBasePropertyReference(property: string): string {

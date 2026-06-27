@@ -96,6 +96,13 @@
   resize: vertical;
 }
 
+.journaling-system-base-properties-textarea {
+  font-family: var(--font-monospace);
+  min-height: 160px;
+  resize: vertical;
+  width: min(420px, 100%);
+}
+
 .journaling-system-remove-property:disabled {
   visibility: hidden;
 }
