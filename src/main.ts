@@ -820,7 +820,7 @@ export default class JournalingSystemPlugin extends Plugin {
     const longProperty = this.getLongProperty().property.trim() || DEFAULT_PROPERTIES[1].property;
     const period = this.getReviewPeriod(level, now);
 
-    return this.app.vault
+    const files = this.app.vault
       .getMarkdownFiles()
       .filter((file) => {
         const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
@@ -846,6 +846,15 @@ export default class JournalingSystemPlugin extends Plugin {
         const bDate = isRecord(bFrontmatter) ? String(bFrontmatter[dateProperty] ?? "") : "";
         return aDate.localeCompare(bDate) || a.path.localeCompare(b.path);
       });
+
+    return dedupeLongEntryFilesByDate(files, (file) => {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      return getJournalDateKey(
+        file,
+        isRecord(frontmatter) ? frontmatter : {},
+        dateProperty
+      );
+    });
   }
 
   getReviewPeriod(level: ReviewLevel, now = moment()): { property: string; value: string } {
@@ -2375,6 +2384,46 @@ function formatJournalEmbedDateLabel(
   }
 
   return `**${file.basename}**`;
+}
+
+function dedupeLongEntryFilesByDate(
+  files: TFile[],
+  getDateKey: (file: TFile) => string
+): TFile[] {
+  const seen = new Set<string>();
+  const deduped: TFile[] = [];
+
+  for (const file of files) {
+    const key = getDateKey(file);
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(file);
+  }
+
+  return deduped;
+}
+
+function getJournalDateKey(
+  file: TFile,
+  frontmatter: Record<string, unknown>,
+  dateProperty: string
+): string {
+  const frontmatterDate = frontmatter[dateProperty];
+  const frontmatterMoment =
+    frontmatterDate === undefined || frontmatterDate === null
+      ? null
+      : parseJournalDate(String(frontmatterDate));
+
+  if (frontmatterMoment?.isValid()) {
+    return frontmatterMoment.format("YYYY-MM-DD");
+  }
+
+  const dateMatch = /\d{4}-\d{2}-\d{2}/.exec(file.path);
+  const pathMoment = dateMatch ? parseJournalDate(dateMatch[0]) : null;
+  return pathMoment?.isValid() ? pathMoment.format("YYYY-MM-DD") : file.path;
 }
 
 function extractNormalizedCaptureEntries(content: string, heading: string): Set<string> {
