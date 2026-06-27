@@ -62,7 +62,8 @@ Plugin commands:
 
 Settings tab:
 
-- Daily prompt times, weekdays, snooze duration, and missed-prompt catch-up.
+- Daily prompt times, weekdays, snooze duration, missed-prompt catch-up, and modal
+  font size.
 - Daily note folder, date format, long-entry heading, and short-capture heading.
 - Daily field labels and property names.
 - Custom user-defined properties using text, number, date, multi-select, or checkbox

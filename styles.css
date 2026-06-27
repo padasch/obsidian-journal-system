@@ -101,6 +101,7 @@
 }
 
 .modal.journaling-system-modal-shell {
+  --journaling-system-modal-font-size: 15px;
   align-self: center;
   margin-top: 0;
   max-height: none;
@@ -109,18 +110,21 @@
 }
 
 .modal.journaling-system-modal-shell .modal-title {
-  font-size: var(--font-ui-large);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: calc(var(--journaling-system-modal-font-size) + 1px);
+  margin-bottom: 14px;
+  padding-bottom: 10px;
 }
 
 .journaling-system-modal {
-  font-size: var(--font-ui-large);
+  font-size: var(--journaling-system-modal-font-size);
 }
 
 .modal.journaling-system-modal-shell .journaling-system-input,
 .modal.journaling-system-modal-shell .journaling-system-textarea,
 .modal.journaling-system-modal-shell .journaling-system-checkbox-row,
 .modal.journaling-system-modal-shell button {
-  font-size: var(--font-ui-large);
+  font-size: var(--journaling-system-modal-font-size);
 }
 
 .modal.journaling-system-modal-shell .modal-content {
@@ -143,13 +147,13 @@
 
 .journaling-system-field-label {
   color: var(--text-normal);
-  font-size: var(--font-ui-large);
+  font-size: var(--journaling-system-modal-font-size);
   font-weight: 600;
 }
 
 .journaling-system-field-hint {
   color: var(--text-muted);
-  font-size: var(--font-ui-medium);
+  font-size: calc(var(--journaling-system-modal-font-size) - 1px);
 }
 
 .journaling-system-checkbox-row {
@@ -196,7 +200,7 @@
   border-radius: 0;
   color: var(--text-normal);
   cursor: pointer;
-  font-size: var(--font-ui-large);
+  font-size: var(--journaling-system-modal-font-size);
   min-height: 30px;
   padding: 6px 8px;
   text-align: left;
@@ -229,6 +233,10 @@
     max-height: calc(50dvh - 64px);
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  .modal.journaling-system-modal-shell .modal-title {
+    font-size: var(--font-ui-large);
   }
 
   .journaling-system-modal {

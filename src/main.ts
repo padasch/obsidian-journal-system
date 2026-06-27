@@ -54,6 +54,9 @@ interface JournalPropertyDefinition {
 
 interface JournalingSystemSettings {
   schemaVersion: number;
+  ui: {
+    modalFontSizePx: number;
+  };
   dailyPrompts: {
     enabled: boolean;
     times: string[];
@@ -118,7 +121,7 @@ interface JournalValue {
   value: string | number | string[] | boolean;
 }
 
-const SETTINGS_SCHEMA_VERSION = 2;
+const SETTINGS_SCHEMA_VERSION = 3;
 const moment = obsidianMoment as unknown as () => Moment;
 
 const WEEKDAYS: Weekday[] = [
@@ -237,6 +240,9 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
 
 const DEFAULT_SETTINGS: JournalingSystemSettings = {
   schemaVersion: SETTINGS_SCHEMA_VERSION,
+  ui: {
+    modalFontSizePx: 15,
+  },
   dailyPrompts: {
     enabled: true,
     times: ["09:00", "20:00"],
@@ -923,8 +929,12 @@ class JournalingPromptModal extends Modal {
     this.inputs.clear();
     contentEl.empty();
     this.modalEl.addClass("journaling-system-modal-shell");
+    this.modalEl.style.setProperty(
+      "--journaling-system-modal-font-size",
+      `${normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx)}px`
+    );
     contentEl.addClass("journaling-system-modal");
-    this.setTitle("Journaling System");
+    this.setTitle(`Journal entry for ${moment().format("YYYY-MM-DD dddd")}`);
 
     const initialFrontmatter = this.plugin.getTodayFrontmatter();
     const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
@@ -1259,6 +1269,25 @@ class JournalingSystemSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    const modalFontSize = normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx);
+    const fontSizeSetting = new Setting(section)
+      .setName("Journal modal font size")
+      .setDesc("Desktop journaling prompt text size.");
+    fontSizeSetting.addSlider((slider) => {
+      const formattedSlider = slider as typeof slider & {
+        setDisplayFormat?: (format: (value: number) => string) => typeof slider;
+      };
+      formattedSlider.setDisplayFormat?.((value) => `${value}px`);
+      slider
+        .setLimits(12, 20, 1)
+        .setValue(modalFontSize)
+        .onChange(async (value) => {
+          const normalized = normalizeModalFontSize(value);
+          this.plugin.settings.ui.modalFontSizePx = normalized;
+          await this.plugin.saveSettings();
+        });
+    });
   }
 
   private displayDailyNoteSettings(containerEl: HTMLElement): void {
@@ -1715,6 +1744,7 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
 
   const migrated = migrateLegacySettings(saved);
   const settings = mergeDefaults(defaults, migrated);
+  settings.ui.modalFontSizePx = normalizeModalFontSize(settings.ui.modalFontSizePx);
   settings.properties = normalizePropertyDefinitions(settings.properties);
   return settings;
 }
@@ -2149,6 +2179,11 @@ function parseInteger(value: string, fallback: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function normalizeModalFontSize(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return clamp(Number.isFinite(parsed) ? Math.round(parsed) : 15, 12, 20);
 }
 
 function ensureMarkdownExtension(fileName: string): string {

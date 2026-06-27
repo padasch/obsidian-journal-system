@@ -22,7 +22,8 @@ long-form journal heading.
 
 The settings tab already includes controls for:
 
-- Daily prompt times, weekdays, snooze duration, and missed-prompt catch-up.
+- Daily prompt times, weekdays, snooze duration, missed-prompt catch-up, and
+  desktop journal modal font size.
 - Daily note folder, date format, long-entry heading, and short-capture section.
 - Daily field labels and property names for `journalShort`, `journalLong`,
   `journalWins`, `journalFails`, `journalTopics`, `journalLocation`, and
