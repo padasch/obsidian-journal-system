@@ -26,6 +26,13 @@
   font-weight: 600;
 }
 
+.journaling-system-folder-preview {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+
 .journaling-system-weekday-row {
   align-items: center;
   display: grid;
@@ -72,7 +79,7 @@
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: 24px minmax(120px, 1.2fr) minmax(140px, 1.2fr) minmax(120px, 1fr) 70px 70px 72px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(130px, 1fr) minmax(130px, 1fr) minmax(115px, 0.9fr) 64px 64px 72px;
 }
 
 .journaling-system-property-input,
@@ -126,6 +133,11 @@
   font-weight: 600;
 }
 
+.journaling-system-field-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
 .journaling-system-checkbox-row {
   align-items: center;
   display: flex;
@@ -136,31 +148,12 @@
 .journaling-system-multiselect {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.journaling-system-multiselect-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.journaling-system-multiselect-row {
-  align-items: start;
-  display: grid;
-  gap: 6px;
-  grid-template-columns: minmax(0, 1fr) auto;
   position: relative;
 }
 
-.journaling-system-remove-row,
-.journaling-system-add-row {
-  min-height: 32px;
-  white-space: nowrap;
-}
-
-.journaling-system-add-row {
-  align-self: flex-start;
+.journaling-system-multiselect-textarea {
+  min-height: 112px;
+  resize: vertical;
 }
 
 .journaling-system-suggestions {
@@ -174,7 +167,7 @@
   max-height: 180px;
   overflow-y: auto;
   position: absolute;
-  top: 32px;
+  top: calc(100% + 4px);
   width: 100%;
   z-index: var(--layer-menu);
 }
@@ -224,7 +217,4 @@
     grid-template-columns: 1fr;
   }
 
-  .journaling-system-multiselect-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }

@@ -43,6 +43,7 @@ interface JournalPropertyDefinition {
   enabled: boolean;
   label: string;
   property: string;
+  placeholder: string;
   type: JournalPropertyType;
   role: JournalPropertyRole;
   min?: number;
@@ -155,6 +156,7 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
     enabled: true,
     label: "Quick entry",
     property: "journalShort",
+    placeholder: "Drop a quick thought",
     type: "text",
     role: "short",
     builtIn: true,
@@ -164,6 +166,7 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
     enabled: true,
     label: "Long journal entry",
     property: "journalLong",
+    placeholder: "Open the long journal section",
     type: "checkbox",
     role: "long",
     builtIn: true,
@@ -173,6 +176,7 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
     enabled: true,
     label: "Wins",
     property: "journalWins",
+    placeholder: "One win per line",
     type: "multiselect",
     role: "wins",
     builtIn: true,
@@ -182,6 +186,7 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
     enabled: true,
     label: "Fails",
     property: "journalFails",
+    placeholder: "One fail per line",
     type: "multiselect",
     role: "fails",
     builtIn: true,
@@ -191,6 +196,7 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
     enabled: true,
     label: "Topics on the mind",
     property: "journalTopics",
+    placeholder: "One topic per line",
     type: "multiselect",
     role: "topics",
     builtIn: true,
@@ -200,6 +206,7 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
     enabled: true,
     label: "Location",
     property: "journalLocation",
+    placeholder: "Where are you?",
     type: "text",
     role: "location",
     builtIn: true,
@@ -209,6 +216,7 @@ const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
     enabled: true,
     label: "Mood",
     property: "journalMood",
+    placeholder: "1-10",
     type: "number",
     role: "mood",
     min: 1,
@@ -485,7 +493,8 @@ export default class JournalingSystemPlugin extends Plugin {
 
   getDailyNotePath(now = moment()): string {
     const fileName = ensureMarkdownExtension(now.format(this.settings.dailyNote.dateFormat));
-    return normalizePath([this.settings.dailyNote.folder, fileName].filter(Boolean).join("/"));
+    const folder = renderTemplatedFolder(this.settings.dailyNote.folder, now);
+    return normalizePath([folder, fileName].filter(Boolean).join("/"));
   }
 
   createDailyNoteContent(now = moment()): string {
@@ -508,7 +517,8 @@ export default class JournalingSystemPlugin extends Plugin {
   getReviewNotePath(level: ReviewLevel, now = moment()): string {
     const reviewSettings = this.settings.reviews[level];
     const fileName = ensureMarkdownExtension(now.format(reviewSettings.noteNameFormat));
-    return normalizePath([this.settings.reviews.folder, fileName].filter(Boolean).join("/"));
+    const folder = renderTemplatedFolder(this.settings.reviews.folder, now);
+    return normalizePath([folder, fileName].filter(Boolean).join("/"));
   }
 
   createReviewNoteContent(level: ReviewLevel, now = moment()): string {
@@ -862,7 +872,7 @@ function createJournalInput(
       definition.role === "short"
         ? fieldEl.createEl("textarea", { cls: "journaling-system-textarea" })
         : fieldEl.createEl("input", { type: "text", cls: "journaling-system-input" });
-    input.placeholder = definition.label;
+    input.placeholder = definition.placeholder || definition.label;
     return {
       getValue: () => input.value.trim(),
     };
@@ -875,6 +885,7 @@ function createJournalInput(
     });
     if (definition.min !== undefined) input.min = String(definition.min);
     if (definition.max !== undefined) input.max = String(definition.max);
+    input.placeholder = definition.placeholder || definition.label;
     return {
       getValue: () => {
         if (input.value.trim().length === 0) {
@@ -891,6 +902,7 @@ function createJournalInput(
       type: "date",
       cls: "journaling-system-input",
     });
+    input.placeholder = definition.placeholder || definition.label;
     return {
       getValue: () => input.value.trim(),
     };
@@ -900,102 +912,59 @@ function createJournalInput(
     const wrapper = fieldEl.createDiv({ cls: "journaling-system-checkbox-row" });
     const input = wrapper.createEl("input", { type: "checkbox" });
     wrapper.createEl("span", { text: definition.label });
+    if (definition.placeholder.trim().length > 0) {
+      fieldEl.createDiv({
+        text: definition.placeholder,
+        cls: "journaling-system-field-hint",
+      });
+    }
     return {
       getValue: () => input.checked,
     };
   }
 
   const existingValues = plugin.collectExistingValues(definition.property);
-  const multiInput = new MultiSelectPropertyInput(app, fieldEl, existingValues);
+  const multiInput = new MultiSelectPropertyInput(
+    fieldEl,
+    existingValues,
+    definition.placeholder || "One entry per line"
+  );
   return {
     getValue: () => multiInput.getValues(),
   };
 }
 
 class MultiSelectPropertyInput {
-  private rows: Array<{
-    containerEl: HTMLElement;
-    inputEl: HTMLInputElement;
-    suggestionsEl: HTMLElement;
-  }> = [];
-  private rowsEl: HTMLElement;
+  private readonly textareaEl: HTMLTextAreaElement;
+  private readonly suggestionsEl: HTMLElement;
 
   constructor(
-    app: App,
     containerEl: HTMLElement,
-    private readonly existingValues: string[]
+    private readonly existingValues: string[],
+    placeholder: string
   ) {
     const wrapper = containerEl.createDiv({ cls: "journaling-system-multiselect" });
-    this.rowsEl = wrapper.createDiv({ cls: "journaling-system-multiselect-rows" });
-
-    for (let index = 0; index < 3; index += 1) {
-      this.addRow();
-    }
-
-    const addButton = wrapper.createEl("button", {
-      text: "Add another",
-      cls: "journaling-system-add-row",
+    this.textareaEl = wrapper.createEl("textarea", {
+      cls: "journaling-system-textarea journaling-system-multiselect-textarea",
     });
-    addButton.type = "button";
-    addButton.addEventListener("click", () => {
-      this.addRow("", true);
+    this.textareaEl.placeholder = placeholder;
+    this.suggestionsEl = wrapper.createDiv({ cls: "journaling-system-suggestions" });
+
+    this.textareaEl.addEventListener("input", () => this.renderSuggestions());
+    this.textareaEl.addEventListener("keyup", () => this.renderSuggestions());
+    this.textareaEl.addEventListener("click", () => this.renderSuggestions());
+    this.textareaEl.addEventListener("blur", () => {
+      window.setTimeout(() => this.suggestionsEl.empty(), 120);
     });
   }
 
   getValues(): string[] {
-    return mergeStringArrays(
-      [],
-      this.rows.flatMap((row) => parseMultiSelectEntry(row.inputEl.value))
-    );
+    return mergeStringArrays([], parseMultiSelectEntry(this.textareaEl.value));
   }
 
-  private addRow(value = "", focus = false): void {
-    const containerEl = this.rowsEl.createDiv({ cls: "journaling-system-multiselect-row" });
-    const inputEl = containerEl.createEl("input", {
-      type: "text",
-      cls: "journaling-system-input journaling-system-multiselect-input",
-      value,
-    });
-    inputEl.placeholder = "Type or pick a value";
-    const removeButton = containerEl.createEl("button", {
-      text: "Remove",
-      cls: "journaling-system-remove-row",
-    });
-    removeButton.type = "button";
-    const suggestionsEl = containerEl.createDiv({ cls: "journaling-system-suggestions" });
-    const row = { containerEl, inputEl, suggestionsEl };
-    this.rows.push(row);
-
-    inputEl.addEventListener("input", () => this.renderSuggestions(row));
-    inputEl.addEventListener("focus", () => this.renderSuggestions(row));
-    inputEl.addEventListener("blur", () => {
-      window.setTimeout(() => suggestionsEl.empty(), 120);
-    });
-    inputEl.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        this.ensureTrailingEmptyRow(row);
-      }
-    });
-    removeButton.addEventListener("click", () => {
-      this.rows = this.rows.filter((existing) => existing !== row);
-      containerEl.remove();
-      if (this.rows.length === 0) {
-        this.addRow("", true);
-      }
-    });
-
-    if (focus) {
-      inputEl.focus();
-    }
-  }
-
-  private renderSuggestions(row: {
-    inputEl: HTMLInputElement;
-    suggestionsEl: HTMLElement;
-  }): void {
-    row.suggestionsEl.empty();
-    const query = row.inputEl.value.trim();
+  private renderSuggestions(): void {
+    this.suggestionsEl.empty();
+    const query = getCurrentLine(this.textareaEl).trim();
 
     if (query.length === 0) {
       return;
@@ -1009,32 +978,21 @@ class MultiSelectPropertyInput {
       .slice(0, 8);
 
     for (const { value } of suggestions) {
-      const button = row.suggestionsEl.createEl("button", {
+      const button = this.suggestionsEl.createEl("button", {
         text: value,
         cls: "journaling-system-suggestion",
       });
       button.type = "button";
       button.addEventListener("click", () => {
-        row.inputEl.value = value;
-        row.suggestionsEl.empty();
-        this.ensureTrailingEmptyRow(row);
+        replaceCurrentLine(this.textareaEl, value);
+        this.suggestionsEl.empty();
+        this.textareaEl.focus();
       });
     }
   }
 
-  private ensureTrailingEmptyRow(currentRow: { inputEl: HTMLInputElement }): void {
-    if (currentRow.inputEl.value.trim().length === 0) {
-      return;
-    }
-
-    const hasEmptyRow = this.rows.some((row) => row.inputEl.value.trim().length === 0);
-    if (!hasEmptyRow) {
-      this.addRow("", true);
-    }
-  }
-
   private currentValues(): string[] {
-    return this.rows.flatMap((row) => parseMultiSelectEntry(row.inputEl.value));
+    return parseMultiSelectEntry(this.textareaEl.value);
   }
 }
 
@@ -1146,7 +1104,6 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       async (value) => {
         this.plugin.settings.dailyNote.folder = value;
         await this.plugin.saveSettings();
-        this.display();
       }
     );
     this.addTextSetting(
@@ -1211,6 +1168,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
             enabled: true,
             label: "New property",
             property: "journalCustom",
+            placeholder: "",
             type: "text",
             role: "custom",
           });
@@ -1269,6 +1227,18 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     propertyName.ariaLabel = "Property name";
     propertyName.addEventListener("change", async () => {
       property.property = propertyName.value.trim() || property.property;
+      await this.plugin.saveSettings();
+    });
+
+    const placeholder = row.createEl("input", {
+      type: "text",
+      value: property.placeholder,
+      cls: "journaling-system-property-input",
+    });
+    placeholder.ariaLabel = "Placeholder text";
+    placeholder.placeholder = "Placeholder";
+    placeholder.addEventListener("change", async () => {
+      property.placeholder = placeholder.value.trim();
       await this.plugin.saveSettings();
     });
 
@@ -1339,7 +1309,6 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       async (value) => {
         this.plugin.settings.reviews.folder = value;
         await this.plugin.saveSettings();
-        this.display();
       }
     );
 
@@ -1481,14 +1450,26 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     value: string,
     onChange: (value: string) => Promise<void>
   ): void {
-    new Setting(containerEl)
-      .setName(name)
+    const setting = new Setting(containerEl).setName(name);
+    const previewEl = setting.settingEl.createDiv({
+      cls: "journaling-system-folder-preview",
+    });
+    const updatePreview = (folderTemplate: string): void => {
+      const parsedFolder = renderTemplatedFolder(folderTemplate, moment());
+      previewEl.setText(
+        `Parsed folder: ${parsedFolder.length > 0 ? parsedFolder : "Vault root"}`
+      );
+    };
+
+    setting
       .addText((text) => {
         text
-          .setPlaceholder("Vault root")
+          .setPlaceholder("journal/{YYYY}")
           .setValue(value)
           .onChange(async (newValue) => {
-            await onChange(normalizePath(newValue.trim()));
+            const normalized = normalizePath(newValue.trim());
+            updatePreview(normalized);
+            await onChange(normalized);
           });
       })
       .addExtraButton((button) => {
@@ -1497,10 +1478,14 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           .setTooltip("Choose folder")
           .onClick(() => {
             new FolderSuggestModal(this.app, async (folder) => {
-              await onChange(folder.isRoot() ? "" : folder.path);
+              const path = folder.isRoot() ? "" : folder.path;
+              await onChange(path);
+              this.display();
             }).open();
           });
       });
+
+    updatePreview(value);
   }
 }
 
@@ -1546,7 +1531,9 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   }
 
   const migrated = migrateLegacySettings(saved);
-  return mergeDefaults(defaults, migrated);
+  const settings = mergeDefaults(defaults, migrated);
+  settings.properties = normalizePropertyDefinitions(settings.properties);
+  return settings;
 }
 
 function migrateLegacySettings(saved: Record<string, unknown>): Record<string, unknown> {
@@ -1569,6 +1556,10 @@ function migrateLegacySettings(saved: Record<string, unknown>): Record<string, u
       label: typeof legacy["label"] === "string" ? legacy["label"] : definition.label,
       property:
         typeof legacy["property"] === "string" ? legacy["property"] : definition.property,
+      placeholder:
+        typeof legacy["placeholder"] === "string"
+          ? legacy["placeholder"]
+          : definition.placeholder,
     };
   });
 
@@ -1593,6 +1584,24 @@ function migrateLegacySettings(saved: Record<string, unknown>): Record<string, u
           : DEFAULT_SETTINGS.automaticProperties.weekday,
     },
   };
+}
+
+function normalizePropertyDefinitions(
+  properties: JournalPropertyDefinition[]
+): JournalPropertyDefinition[] {
+  return properties.map((property) => {
+    const defaultProperty = DEFAULT_PROPERTIES.find(
+      (definition) => definition.id === property.id
+    );
+
+    return {
+      ...property,
+      placeholder:
+        typeof property.placeholder === "string"
+          ? property.placeholder
+          : defaultProperty?.placeholder ?? "",
+    };
+  });
 }
 
 function toFrontmatterValue(
@@ -1735,9 +1744,32 @@ function parseDelimitedList(value: string): string[] {
 
 function parseMultiSelectEntry(value: string): string[] {
   return value
-    .split(/[,;]+/)
+    .split(/\r?\n/)
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function getCurrentLine(textarea: HTMLTextAreaElement): string {
+  const value = textarea.value;
+  const cursor = textarea.selectionStart ?? value.length;
+  const lineStart = value.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
+  const lineEndIndex = value.indexOf("\n", cursor);
+  const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex;
+  return value.slice(lineStart, lineEnd);
+}
+
+function replaceCurrentLine(textarea: HTMLTextAreaElement, replacement: string): void {
+  const value = textarea.value;
+  const cursor = textarea.selectionStart ?? value.length;
+  const lineStart = value.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
+  const lineEndIndex = value.indexOf("\n", cursor);
+  const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex;
+  const nextLine = lineEndIndex === -1 ? "\n" : "";
+  const nextValue = `${value.slice(0, lineStart)}${replacement}${nextLine}${value.slice(lineEnd)}`;
+  const nextCursor = lineStart + replacement.length + nextLine.length;
+
+  textarea.value = nextValue;
+  textarea.setSelectionRange(nextCursor, nextCursor);
 }
 
 function findLatestDuePromptTime(times: string[], currentTime: string): string | null {
@@ -1759,6 +1791,13 @@ function clamp(value: number, min: number, max: number): number {
 
 function ensureMarkdownExtension(fileName: string): string {
   return fileName.endsWith(".md") ? fileName : `${fileName}.md`;
+}
+
+function renderTemplatedFolder(folderTemplate: string, date: Moment): string {
+  const rendered = folderTemplate.replace(/\{([^{}]+)\}/g, (_match, token: string) =>
+    date.format(token)
+  );
+  return normalizePath(rendered.trim());
 }
 
 function existingValueOrBlank(existing: unknown): number | string {

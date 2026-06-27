@@ -29,10 +29,13 @@ The settings tab already includes controls for:
   `journalMood`.
 - Additional user-defined properties with text, number, date, multi-select, or
   checkbox property types.
+- Per-field placeholder text for all journal fields.
 - Automatic property names for journal date, time, and weekday.
 - Weekly, monthly, and annual review schedules.
 - Review content options for managed rollups, inline Bases, and long-entry embeds.
 - Folder fields use Obsidian's native fuzzy selection modal for quick selection.
+- Folder fields accept date tokens in braces, for example `journal/{YYYY}`, and show
+  the parsed folder underneath the setting.
 
 ## Current commands
 
@@ -43,8 +46,8 @@ The settings tab already includes controls for:
 - `Journaling System: Open annual review`
 
 Multi-select fields suggest existing values already used for the configured property
-name and rank them with lightweight fuzzy matching. Multi-select fields show several
-entry rows directly in the modal, plus an `Add another` button for longer lists.
+name and rank them with lightweight fuzzy matching. Enter multiple values by putting
+one value on each line.
 
 ## Development
 
