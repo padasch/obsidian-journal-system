@@ -1,13 +1,16 @@
 import {
   App,
   ButtonComponent,
+  FuzzySuggestModal,
   MarkdownView,
   Modal,
   Notice,
   Plugin,
   PluginSettingTab,
   Setting,
+  TAbstractFile,
   TFile,
+  TFolder,
   moment as obsidianMoment,
   normalizePath,
 } from "obsidian";
@@ -1111,10 +1114,16 @@ class JournalingSystemSettingTab extends PluginSettingTab {
   private displayDailyNoteSettings(containerEl: HTMLElement): void {
     const section = createSettingsSection(containerEl, "Daily note");
 
-    this.addTextSetting(section, "Folder", this.plugin.settings.dailyNote.folder, async (value) => {
-      this.plugin.settings.dailyNote.folder = value;
-      await this.plugin.saveSettings();
-    });
+    this.addFolderSetting(
+      section,
+      "Folder",
+      this.plugin.settings.dailyNote.folder,
+      async (value) => {
+        this.plugin.settings.dailyNote.folder = value;
+        await this.plugin.saveSettings();
+        this.display();
+      }
+    );
     this.addTextSetting(
       section,
       "Date format",
@@ -1298,10 +1307,16 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addReviewRow(section, "Monthly", "monthly");
     this.addReviewRow(section, "Annual", "annual");
 
-    this.addTextSetting(section, "Review folder", this.plugin.settings.reviews.folder, async (value) => {
-      this.plugin.settings.reviews.folder = value;
-      await this.plugin.saveSettings();
-    });
+    this.addFolderSetting(
+      section,
+      "Review folder",
+      this.plugin.settings.reviews.folder,
+      async (value) => {
+        this.plugin.settings.reviews.folder = value;
+        await this.plugin.saveSettings();
+        this.display();
+      }
+    );
 
     new Setting(section)
       .setName("Rollup source")
@@ -1433,6 +1448,62 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           await onChange(newValue.trim());
         });
       });
+  }
+
+  private addFolderSetting(
+    containerEl: HTMLElement,
+    name: string,
+    value: string,
+    onChange: (value: string) => Promise<void>
+  ): void {
+    new Setting(containerEl)
+      .setName(name)
+      .addText((text) => {
+        text
+          .setPlaceholder("Vault root")
+          .setValue(value)
+          .onChange(async (newValue) => {
+            await onChange(normalizePath(newValue.trim()));
+          });
+      })
+      .addExtraButton((button) => {
+        button
+          .setIcon("folder-search")
+          .setTooltip("Choose folder")
+          .onClick(() => {
+            new FolderSuggestModal(this.app, async (folder) => {
+              await onChange(folder.isRoot() ? "" : folder.path);
+            }).open();
+          });
+      });
+  }
+}
+
+class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
+  constructor(
+    app: App,
+    private readonly onChooseFolder: (folder: TFolder) => void | Promise<void>
+  ) {
+    super(app);
+    this.setPlaceholder("Choose a folder");
+  }
+
+  getItems(): TFolder[] {
+    const folders = this.app.vault
+      .getAllLoadedFiles()
+      .filter((file: TAbstractFile): file is TFolder => file instanceof TFolder)
+      .sort((a, b) => this.getItemText(a).localeCompare(this.getItemText(b)));
+
+    const root = this.app.vault.getRoot();
+    return [root, ...folders.filter((folder) => !folder.isRoot())];
+  }
+
+  getItemText(folder: TFolder): string {
+    return folder.isRoot() ? "Vault root" : folder.path;
+  }
+
+  onChooseItem(folder: TFolder): void {
+    void this.onChooseFolder(folder);
   }
 }
 

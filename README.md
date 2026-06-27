@@ -32,6 +32,7 @@ The settings tab already includes controls for:
 - Automatic property names for journal date, time, and weekday.
 - Weekly, monthly, and annual review schedules.
 - Review content options for managed rollups, inline Bases, and long-entry embeds.
+- Folder fields use Obsidian's native fuzzy selection modal for quick selection.
 
 ## Current commands
 
