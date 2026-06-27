@@ -155,12 +155,6 @@ const PROPERTY_TYPE_LABELS: Record<JournalPropertyType, string> = {
   checkbox: "Checkbox",
 };
 
-const ROLLUP_SOURCE_LABELS: Record<RollupSource, string> = {
-  "hybrid-hierarchy": "Hybrid hierarchy",
-  "daily-notes": "Daily notes only",
-  "prior-reviews": "Prior reviews",
-};
-
 const BASE_ROW_HEIGHT_LABELS: Record<BaseRowHeight, string> = {
   default: "Default",
   short: "Short",
@@ -193,6 +187,8 @@ const REVIEW_LONG_ENTRIES_START = "<!-- JOURNALING-SYSTEM:LONG-ENTRIES:START -->
 const REVIEW_LONG_ENTRIES_END = "<!-- JOURNALING-SYSTEM:LONG-ENTRIES:END -->";
 const LEGACY_LONG_ENTRIES_PLACEHOLDER =
   "<!-- Long-entry embeds will be generated in a later milestone. -->";
+const REVIEW_ROLLUP_START = "<!-- JOURNALING-SYSTEM:ROLLUP:START -->";
+const REVIEW_ROLLUP_END = "<!-- JOURNALING-SYSTEM:ROLLUP:END -->";
 
 const DEFAULT_PROPERTIES: JournalPropertyDefinition[] = [
   {
@@ -324,7 +320,7 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     },
     folder: "",
     rollupSource: "hybrid-hierarchy",
-    includeManagedRollupBlock: true,
+    includeManagedRollupBlock: false,
     includeInlineBases: true,
     includeLongEntryEmbeds: true,
     reflectionHeading: "Review",
@@ -571,6 +567,7 @@ export default class JournalingSystemPlugin extends Plugin {
 
     if (existing) {
       await this.writeReviewProperties(existing, level, now);
+      await this.cleanupLegacyReviewScaffolding(existing);
       await this.ensureReviewBaseBlock(existing, level, now);
       await this.ensureReviewLongEntryEmbeds(existing, level, now);
       return existing;
@@ -595,19 +592,6 @@ export default class JournalingSystemPlugin extends Plugin {
       `## ${this.settings.reviews.reflectionHeading}`,
       "",
     ];
-
-    if (this.settings.reviews.includeManagedRollupBlock) {
-      lines.push(
-        `## ${this.settings.reviews.rollupHeading}`,
-        "",
-        "<!-- JOURNALING-SYSTEM:ROLLUP:START -->",
-        `- Review level: ${level}`,
-        `- Rollup source: ${this.settings.reviews.rollupSource}`,
-        "- Generated summaries will be refreshed by Journaling System.",
-        "<!-- JOURNALING-SYSTEM:ROLLUP:END -->",
-        ""
-      );
-    }
 
     if (this.settings.reviews.includeInlineBases) {
       lines.push(
@@ -660,6 +644,20 @@ export default class JournalingSystemPlugin extends Plugin {
     });
   }
 
+  async cleanupLegacyReviewScaffolding(file: TFile): Promise<void> {
+    const content = await this.app.vault.read(file);
+    const withoutRollup = removeManagedSection(
+      content,
+      this.settings.reviews.rollupHeading,
+      REVIEW_ROLLUP_START,
+      REVIEW_ROLLUP_END
+    );
+
+    if (withoutRollup !== content) {
+      await this.app.vault.modify(file, withoutRollup);
+    }
+  }
+
   async ensureReviewBaseBlock(file: TFile, level: ReviewLevel, now = moment()): Promise<void> {
     if (!this.settings.reviews.includeInlineBases) {
       return;
@@ -675,6 +673,11 @@ export default class JournalingSystemPlugin extends Plugin {
     );
     const updated =
       withManagedBlock ??
+      replaceGeneratedBaseBlockInSection(
+        content,
+        this.settings.reviews.sourceNotesHeading,
+        block
+      ) ??
       content.replace(LEGACY_REVIEW_BASE_BLOCK, block);
 
     if (updated !== content) {
@@ -719,7 +722,14 @@ export default class JournalingSystemPlugin extends Plugin {
       return;
     }
 
-    if (sectionContainsManagedBlock(content, "Long entries", REVIEW_LONG_ENTRIES_START)) {
+    const withGeneratedSection = replaceGeneratedLongEntriesInSection(
+      content,
+      "Long entries",
+      block
+    );
+
+    if (withGeneratedSection && withGeneratedSection !== content) {
+      await this.app.vault.modify(file, withGeneratedSection);
       return;
     }
 
@@ -763,7 +773,6 @@ export default class JournalingSystemPlugin extends Plugin {
     const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
 
     return [
-      REVIEW_BASE_START,
       "```base",
       "filters:",
       "  and:",
@@ -776,7 +785,6 @@ export default class JournalingSystemPlugin extends Plugin {
       "    order:",
       ...columns.map((property) => `      - ${formatBasePropertyReference(property)}`),
       "```",
-      REVIEW_BASE_END,
     ];
   }
 
@@ -788,9 +796,7 @@ export default class JournalingSystemPlugin extends Plugin {
         : ["No long journal entries found for this period."];
 
     return [
-      REVIEW_LONG_ENTRIES_START,
       ...embeds,
-      REVIEW_LONG_ENTRIES_END,
     ];
   }
 
@@ -1671,19 +1677,6 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       }
     );
 
-    new Setting(section)
-      .setName("Rollup source")
-      .addDropdown((dropdown) => {
-        dropdown
-          .addOptions(ROLLUP_SOURCE_LABELS)
-          .setValue(this.plugin.settings.reviews.rollupSource)
-          .onChange(async (value) => {
-            this.plugin.settings.reviews.rollupSource = value as RollupSource;
-            await this.plugin.saveSettings();
-          });
-      });
-
-    this.addToggleSetting(section, "Managed rollup block", "includeManagedRollupBlock");
     this.addToggleSetting(section, "Inline Bases", "includeInlineBases");
     this.addToggleSetting(section, "Long-entry embeds", "includeLongEntryEmbeds");
 
@@ -2154,6 +2147,37 @@ function replaceManagedBlock(
   return `${content.slice(0, startIndex)}${replacement}${content.slice(endIndex + endMarker.length)}`;
 }
 
+function removeManagedSection(
+  content: string,
+  heading: string,
+  startMarker: string,
+  endMarker: string
+): string {
+  const cleanHeading = heading.trim();
+  if (cleanHeading.length === 0) {
+    return content;
+  }
+
+  const headingMatch = findHeadingLine(content, cleanHeading);
+  if (!headingMatch) {
+    return content;
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  const section = content.slice(headingMatch.start, sectionEnd);
+  if (!section.includes(startMarker) || !section.includes(endMarker)) {
+    return content;
+  }
+
+  const before = content.slice(0, headingMatch.start).trimEnd();
+  const after = content.slice(sectionEnd).trimStart();
+  if (before.length === 0) {
+    return after.length > 0 ? `${after}\n` : "";
+  }
+
+  return after.length > 0 ? `${before}\n\n${after}` : `${before}\n`;
+}
+
 function insertBlockUnderHeading(content: string, heading: string, block: string): string {
   const cleanHeading = heading.trim();
   if (cleanHeading.length === 0) {
@@ -2170,6 +2194,72 @@ function insertBlockUnderHeading(content: string, heading: string, block: string
   return after.length > 0 ? `${before}\n\n${block}\n\n${after}` : `${before}\n\n${block}\n`;
 }
 
+function replaceGeneratedBaseBlockInSection(
+  content: string,
+  heading: string,
+  block: string
+): string | null {
+  const cleanHeading = heading.trim();
+  if (cleanHeading.length === 0) {
+    return null;
+  }
+
+  const headingMatch = findHeadingLine(content, cleanHeading);
+  if (!headingMatch) {
+    return null;
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  const section = content.slice(headingMatch.end, sectionEnd);
+  const match = /```base[\s\S]*?```/.exec(section);
+  if (!match) {
+    return null;
+  }
+
+  if (!/name:\s+(Daily notes in this|Journal source notes)/.test(match[0])) {
+    return null;
+  }
+
+  const start = headingMatch.end + match.index;
+  const end = start + match[0].length;
+  return `${content.slice(0, start)}${block}${content.slice(end)}`;
+}
+
+function replaceGeneratedLongEntriesInSection(
+  content: string,
+  heading: string,
+  block: string
+): string | null {
+  const cleanHeading = heading.trim();
+  if (cleanHeading.length === 0) {
+    return null;
+  }
+
+  const headingMatch = findHeadingLine(content, cleanHeading);
+  if (!headingMatch) {
+    return null;
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  const section = content.slice(headingMatch.end, sectionEnd);
+
+  if (section.trim().length === 0) {
+    return `${content.slice(0, headingMatch.end)}\n${block}\n${content.slice(sectionEnd)}`;
+  }
+
+  const generatedMatch =
+    /^\s*(?:(?:!\[\[[^\n]+\]\]|No long journal entries found for this period\.)\s*)+/.exec(
+      section
+    );
+  if (!generatedMatch) {
+    return null;
+  }
+
+  const remaining = section.slice(generatedMatch[0].length).trimStart();
+  const nextSection = remaining.length > 0 ? `\n${block}\n\n${remaining}` : `\n${block}\n`;
+  return `${content.slice(0, headingMatch.end)}${nextSection}${content.slice(sectionEnd)}`;
+}
+
 function sectionContainsBaseBlock(content: string, heading: string): boolean {
   const cleanHeading = heading.trim();
   if (cleanHeading.length === 0) {
@@ -2183,25 +2273,6 @@ function sectionContainsBaseBlock(content: string, heading: string): boolean {
 
   const sectionEnd = findSectionEnd(content, headingMatch);
   return content.slice(headingMatch.end, sectionEnd).includes("```base");
-}
-
-function sectionContainsManagedBlock(
-  content: string,
-  heading: string,
-  startMarker: string
-): boolean {
-  const cleanHeading = heading.trim();
-  if (cleanHeading.length === 0) {
-    return false;
-  }
-
-  const headingMatch = findHeadingLine(content, cleanHeading);
-  if (!headingMatch) {
-    return false;
-  }
-
-  const sectionEnd = findSectionEnd(content, headingMatch);
-  return content.slice(headingMatch.end, sectionEnd).includes(startMarker);
 }
 
 function frontmatterMatchesReviewPeriod(

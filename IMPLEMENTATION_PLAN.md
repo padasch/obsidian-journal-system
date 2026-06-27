@@ -69,8 +69,8 @@ Settings tab:
 - Custom user-defined properties using text, number, date, multi-select, or checkbox
   types.
 - Weekly, monthly, and annual review schedule settings.
-- Review content options for managed rollups, inline Bases, long-entry embeds,
-  generated Base columns, and Base row height.
+- Review content options for inline Bases, long-entry embeds, generated Base
+  columns, and Base row height.
 
 ## Product Direction
 
@@ -102,8 +102,9 @@ Higher-level reviews:
 
 - Support weekly, monthly, and annual review prompts.
 - Users can choose which review levels they want and when to be prompted.
-- Review notes contain user-written reflection plus plugin-managed generated sections.
-- Plugin-managed rollup blocks are delimited and refreshable.
+- Review notes contain user-written reflection plus generated evidence sections.
+- Empty placeholder rollup sections should not be generated before review synthesis
+  has real behavior.
 - User-authored text outside managed blocks is never overwritten.
 
 Review rollup model:
