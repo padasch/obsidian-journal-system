@@ -115,6 +115,8 @@ Review rollup model:
   `![[daily-note#Journal]]`.
 - Generated review notes now refresh a managed long-entry embed block from matching
   daily notes whose long-entry property is true.
+- Long-entry embeds in review notes are preceded by a bold `YYYY-MM-DD dddd`
+  source-date label.
 - Inline Bases can be inserted as live evidence panels for underlying notes.
 - Generated review Bases filter daily notes to the current review period and display
   the configured daily journal properties.

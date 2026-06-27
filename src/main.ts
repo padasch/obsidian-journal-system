@@ -790,9 +790,22 @@ export default class JournalingSystemPlugin extends Plugin {
 
   createLongEntryEmbedsBlock(level: ReviewLevel, now = moment()): string[] {
     const files = this.getLongEntrySourceFiles(level, now);
+    const dateProperty =
+      this.settings.automaticProperties.date.trim() ||
+      DEFAULT_SETTINGS.automaticProperties.date;
     const embeds =
       files.length > 0
-        ? files.map((file) => formatJournalEmbed(file, this.settings.dailyNote.longEntryHeading))
+        ? files.flatMap((file) => {
+            const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+            return [
+              formatJournalEmbedDateLabel(
+                file,
+                isRecord(frontmatter) ? frontmatter : {},
+                dateProperty
+              ),
+              formatJournalEmbed(file, this.settings.dailyNote.longEntryHeading),
+            ];
+          })
         : ["No long journal entries found for this period."];
 
     return [
@@ -2248,7 +2261,7 @@ function replaceGeneratedLongEntriesInSection(
   }
 
   const generatedMatch =
-    /^\s*(?:(?:!\[\[[^\n]+\]\]|No long journal entries found for this period\.)\s*)+/.exec(
+    /^\s*(?:(?:\*\*[^\n]+\*\*\s*)?(?:!\[\[[^\n]+\]\]|No long journal entries found for this period\.)\s*)+/.exec(
       section
     );
   if (!generatedMatch) {
@@ -2338,6 +2351,30 @@ function formatJournalEmbed(file: TFile, heading: string): string {
   return cleanHeading.length > 0
     ? `![[${linkPath}#${cleanHeading}]]`
     : `![[${linkPath}]]`;
+}
+
+function formatJournalEmbedDateLabel(
+  file: TFile,
+  frontmatter: Record<string, unknown>,
+  dateProperty: string
+): string {
+  const frontmatterDate = frontmatter[dateProperty];
+  const frontmatterMoment =
+    frontmatterDate === undefined || frontmatterDate === null
+      ? null
+      : parseJournalDate(String(frontmatterDate));
+
+  if (frontmatterMoment?.isValid()) {
+    return `**${frontmatterMoment.format("YYYY-MM-DD dddd")}**`;
+  }
+
+  const dateMatch = /\d{4}-\d{2}-\d{2}/.exec(file.path);
+  const pathMoment = dateMatch ? parseJournalDate(dateMatch[0]) : null;
+  if (pathMoment?.isValid()) {
+    return `**${pathMoment.format("YYYY-MM-DD dddd")}**`;
+  }
+
+  return `**${file.basename}**`;
 }
 
 function extractNormalizedCaptureEntries(content: string, heading: string): Set<string> {

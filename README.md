@@ -63,6 +63,7 @@ Review Base columns can be edited as one property per line in settings, with the
 available fields shown below the control.
 When long-entry embeds are enabled, review notes embed matching daily `## Journal`
 sections for notes whose long-entry property is true.
+Each embedded long entry is preceded by a bold `YYYY-MM-DD dddd` label.
 Generated review notes avoid visible management comments; old placeholder Rollup
 sections and generated marker comments are cleaned up when review notes are reopened.
 
