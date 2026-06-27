@@ -22,9 +22,10 @@ Reference docs:
 
 ## First Milestone
 
-The first milestone is a release-ready skeleton rather than the full journaling
-system. It should be installable through BRAT and expose one command that proves the
-plugin is loaded.
+The first milestone is a release-ready skeleton plus a real settings surface for the
+planned journaling workflow. It should be installable through BRAT, expose one command
+that proves the plugin is loaded, and let users configure the daily/review behavior
+before the writing and scheduling engine is implemented.
 
 Files:
 
@@ -53,6 +54,14 @@ Plugin command:
 - ID: `open-journaling-prompt`
 - Name: `Open journaling prompt`
 - Initial behavior: open a placeholder modal.
+
+Settings tab:
+
+- Daily prompt times, weekdays, snooze duration, and missed-prompt catch-up.
+- Daily note folder, date format, long-entry heading, and short-capture heading.
+- Daily field labels and property names.
+- Weekly, monthly, and annual review schedule settings.
+- Review content options for managed rollups, inline Bases, and long-entry embeds.
 
 ## Product Direction
 

@@ -7,10 +7,13 @@ import esbuild from "esbuild";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPath = path.join(root, "manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+const mainJsPath = path.join(root, "main.js");
 
 if (typeof manifest.id !== "string" || manifest.id.length === 0) {
   throw new Error("manifest.json must define a non-empty plugin id.");
 }
+
+await rm(mainJsPath, { force: true });
 
 await esbuild.build({
   banner: {
@@ -36,7 +39,7 @@ await esbuild.build({
   format: "cjs",
   logLevel: "info",
   minify: true,
-  outfile: path.join(root, "main.js"),
+  outfile: mainJsPath,
   sourcemap: false,
   target: "es2018",
   treeShaking: true,

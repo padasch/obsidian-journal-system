@@ -1,6 +1,10 @@
 import esbuild from "esbuild";
+import { rm } from "node:fs/promises";
 
 const prod = process.argv.includes("production");
+const outfile = "main.js";
+
+await rm(outfile, { force: true });
 
 await esbuild.build({
   banner: {
@@ -26,7 +30,7 @@ await esbuild.build({
   format: "cjs",
   logLevel: "info",
   minify: prod,
-  outfile: "main.js",
+  outfile,
   sourcemap: prod ? false : "inline",
   target: "es2018",
   treeShaking: true,
