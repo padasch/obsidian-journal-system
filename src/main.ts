@@ -35,7 +35,7 @@ type JournalPropertyRole =
 type RollupSource = "hybrid-hierarchy" | "daily-notes" | "prior-reviews";
 type ReviewLevel = "weekly" | "monthly" | "annual";
 type JournalType = "daily" | ReviewLevel;
-type BaseRowHeight = "default" | "short" | "medium" | "tall";
+type BaseRowHeight = "default" | "short" | "medium" | "tall" | "extra-tall";
 type BaseColumnSizes = Record<string, number>;
 type BasePropertyListKey = "baseProperties" | "reviewBaseProperties";
 
@@ -157,7 +157,7 @@ interface DailyReviewSummaryItem {
   hasLongEntry: boolean;
 }
 
-const SETTINGS_SCHEMA_VERSION = 7;
+const SETTINGS_SCHEMA_VERSION = 8;
 const moment = obsidianMoment as unknown as () => Moment;
 
 const WEEKDAYS: Weekday[] = [
@@ -193,6 +193,7 @@ const BASE_ROW_HEIGHT_LABELS: Record<BaseRowHeight, string> = {
   short: "Short",
   medium: "Medium",
   tall: "Tall",
+  "extra-tall": "Extra tall",
 };
 
 const DEFAULT_REVIEW_BASE_PROPERTIES = [
@@ -421,14 +422,14 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
       enabled: true,
       promptWeekday: "sunday",
       promptTime: "18:00",
-      noteNameFormat: "[Week] WW - YYYY",
+      noteNameFormat: "YYYY - [Week] WW",
       lastPromptKey: "",
     },
     monthly: {
       enabled: true,
       promptDayOfMonth: 1,
       promptTime: "18:00",
-      noteNameFormat: "MMMM YYYY",
+      noteNameFormat: "YYYY-MM MMMM",
       lastPromptKey: "",
     },
     annual: {
@@ -457,7 +458,7 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     longEntriesHeading: "Long entries",
     baseProperties: [...DEFAULT_REVIEW_BASE_PROPERTIES],
     reviewBaseProperties: [...DEFAULT_REVIEW_SOURCE_BASE_PROPERTIES],
-    baseRowHeight: "tall",
+    baseRowHeight: "extra-tall",
     baseColumnSizes: { ...DEFAULT_REVIEW_BASE_COLUMN_SIZES },
     reviewProperties: DEFAULT_REVIEW_PROPERTIES.map((property) => ({ ...property })),
     checklistItems: cloneChecklistItems(DEFAULT_REVIEW_CHECKLIST_ITEMS),
@@ -1115,7 +1116,7 @@ export default class JournalingSystemPlugin extends Plugin {
       (property) => `Fill ${property.property}`
     );
 
-    return [...configuredItems, ...propertyItems].map((item) => `- [ ] ${item}`);
+    return [...configuredItems, ...propertyItems].map((item) => `- ${item}`);
   }
 
   createReviewFieldsBaseBlock(level: ReviewLevel): string[] {
@@ -3262,6 +3263,7 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   const migrated = migrateLegacySettings(saved);
   const savedSchemaVersion = getSavedSchemaVersion(migrated);
   const settings = mergeDefaults(defaults, migrated);
+  migrateDefaultReviewFormats(settings, savedSchemaVersion);
   settings.ui.modalFontSizePx = normalizeModalFontSize(settings.ui.modalFontSizePx);
   settings.properties = normalizePropertyDefinitions(settings.properties);
   settings.reviews.baseProperties = normalizeDailyBaseProperties(
@@ -3308,6 +3310,29 @@ function getSavedSchemaVersion(saved: Record<string, unknown>): number {
   return typeof saved.schemaVersion === "number" && Number.isFinite(saved.schemaVersion)
     ? saved.schemaVersion
     : 0;
+}
+
+function migrateDefaultReviewFormats(
+  settings: JournalingSystemSettings,
+  savedSchemaVersion: number
+): void {
+  if (savedSchemaVersion >= 8) {
+    return;
+  }
+
+  if (settings.reviews.weekly.noteNameFormat === "[Week] WW - YYYY") {
+    settings.reviews.weekly.noteNameFormat =
+      DEFAULT_SETTINGS.reviews.weekly.noteNameFormat;
+  }
+
+  if (settings.reviews.monthly.noteNameFormat === "MMMM YYYY") {
+    settings.reviews.monthly.noteNameFormat =
+      DEFAULT_SETTINGS.reviews.monthly.noteNameFormat;
+  }
+
+  if (settings.reviews.baseRowHeight === "tall") {
+    settings.reviews.baseRowHeight = DEFAULT_SETTINGS.reviews.baseRowHeight;
+  }
 }
 
 function migrateLegacySettings(saved: Record<string, unknown>): Record<string, unknown> {
@@ -3708,9 +3733,13 @@ function parseLineList(value: string): string[] {
 }
 
 function normalizeBaseRowHeight(value: unknown): BaseRowHeight {
-  return value === "short" || value === "medium" || value === "tall" || value === "default"
+  return value === "short" ||
+    value === "medium" ||
+    value === "tall" ||
+    value === "extra-tall" ||
+    value === "default"
     ? value
-    : "tall";
+    : "extra-tall";
 }
 
 function formatBasePropertyReference(property: string): string {

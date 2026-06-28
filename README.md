@@ -20,7 +20,7 @@ long-form journal heading.
   marker, synchronize the long-entry property from actual section text, and place
   the cursor where writing should start.
 - Prompt for daily, weekly, monthly, and annual reviews on configurable schedules.
-- Generate review workspaces with checklist prompts, source Bases, and fillable
+- Generate review workspaces with plain bullet checklist prompts, source Bases, and fillable
   review properties while preserving user-written reflection.
 - Add a one-row review-fields Base to each review note so review properties can
   be edited in the note body instead of only through YAML.
@@ -77,6 +77,8 @@ workflow and how the settings sections relate to each other.
   monthly, and annual settings control the review prompt schedule, review note
   name format, checklist prompts, and whether that level embeds daily long
   entries.
+- Default review note name formats are `YYYY - [Week] WW`, `YYYY-MM MMMM`, and
+  `YYYY [Annual Review]`.
 
 Folder fields use Obsidian's native fuzzy selection modal for quick selection.
 Folder fields accept date tokens in braces, for example `journal/{YYYY}`, and show
@@ -119,7 +121,7 @@ widths are set for `journalShort`, `journalLocation`, `journalHighlights`,
 `journalDifficulties`, `journalImprovements`, `journalLife`, `journalWork`, and
 `journalThemes`. Generated Bases also set display names for configured columns, so
 properties such as `journalWeek` and `journalDifficulties` render as `Week` and
-`Difficulties`.
+`Difficulties`. The default generated Base row height is `extra-tall`.
 
 When long-entry embeds are enabled for a review level, review notes scan matching
 daily notes and embed `## Journal` sections that contain actual text. The
