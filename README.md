@@ -53,8 +53,9 @@ The settings tab is organized into:
 - Separate Daily, Weekly, Monthly, and Annual settings sections for prompts,
   note formats, checklist prompts, and per-level long-entry embed behavior.
 
-The settings page also includes a foldable overview explaining the intended
-workflow and how the settings sections relate to each other.
+The settings page also includes a boxed foldable overview explaining the intended
+workflow. Major settings groups are boxed collapsible sections so the page stays
+scannable as options grow.
 
 ### Settings guide
 

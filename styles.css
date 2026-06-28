@@ -4,34 +4,46 @@
   letter-spacing: 0;
 }
 
-.journaling-system-settings-section {
-  border-top: 1px solid var(--background-modifier-border);
-  padding-block: 16px 8px;
+.journaling-system-settings-section,
+.journaling-system-system-note {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  margin: 14px 0;
+  overflow: hidden;
 }
 
-.journaling-system-settings-section h2 {
-  margin: 0 0 8px;
+.journaling-system-settings-section-summary,
+.journaling-system-system-note-summary {
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  cursor: pointer;
+  display: list-item;
   font-size: var(--font-ui-large);
+  font-weight: 650;
+  line-height: 1.35;
+  padding: 12px 14px;
+}
+
+.journaling-system-settings-section:not([open]) .journaling-system-settings-section-summary,
+.journaling-system-system-note:not([open]) .journaling-system-system-note-summary {
+  border-bottom: 0;
+}
+
+.journaling-system-settings-section-body {
+  padding: 4px 14px 14px;
 }
 
 .journaling-system-system-note {
-  border-top: 1px solid var(--background-modifier-border);
   color: var(--text-muted);
-  padding: 12px 0 4px;
-}
-
-.journaling-system-system-note-summary {
-  color: var(--text-normal);
-  cursor: pointer;
-  font-size: var(--font-ui-medium);
-  font-weight: 600;
 }
 
 .journaling-system-system-note-body {
-  font-size: var(--font-ui-small);
-  line-height: 1.5;
+  font-size: var(--font-ui-medium);
+  line-height: 1.55;
   max-width: 760px;
-  padding-top: 8px;
+  padding: 12px 14px 14px;
 }
 
 .journaling-system-system-note-body p {
@@ -40,8 +52,8 @@
 
 .journaling-system-system-note-body h4 {
   color: var(--text-normal);
-  font-size: var(--font-ui-small);
-  margin: 12px 0 6px;
+  font-size: var(--font-ui-medium);
+  margin: 14px 0 6px;
 }
 
 .journaling-system-system-note-body ul {
@@ -54,9 +66,11 @@
 }
 
 .journaling-system-section-note {
-  margin-bottom: 10px;
   color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
+  font-size: var(--font-ui-small);
+  line-height: 1.45;
+  margin-bottom: 12px;
+  max-width: 760px;
 }
 
 .journaling-system-setting-label {

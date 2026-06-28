@@ -3333,9 +3333,15 @@ class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
 }
 
 function createSettingsSection(containerEl: HTMLElement, title: string): HTMLElement {
-  const section = containerEl.createDiv({ cls: "journaling-system-settings-section" });
-  section.createEl("h2", { text: title });
-  return section;
+  const section = containerEl.createEl("details", {
+    cls: "journaling-system-settings-section",
+  });
+  section.open = true;
+  section.createEl("summary", {
+    text: title,
+    cls: "journaling-system-settings-section-summary",
+  });
+  return section.createDiv({ cls: "journaling-system-settings-section-body" });
 }
 
 function normalizeSettings(saved: unknown): JournalingSystemSettings {
