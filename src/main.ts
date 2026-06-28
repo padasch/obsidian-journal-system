@@ -7,6 +7,7 @@ import {
   Notice,
   Plugin,
   PluginSettingTab,
+  requestUrl,
   Setting,
   TAbstractFile,
   TFile,
@@ -39,6 +40,15 @@ type BaseRowHeight = "default" | "short" | "medium" | "tall" | "extra";
 type BaseColumnSizes = Record<string, number>;
 type BasePropertyListKey = "baseProperties" | "reviewBaseProperties";
 type DailyPromptBehavior = "always" | "if-no-quick-entry";
+type LocalAiProvider = "ollama";
+
+interface LocalAiSettings {
+  enabled: boolean;
+  provider: LocalAiProvider;
+  baseUrl: string;
+  model: string;
+  summaryProperty: string;
+}
 
 interface JournalPropertyDefinition {
   id: string;
@@ -72,6 +82,7 @@ interface JournalingSystemSettings {
     modalMaxHeightVh: number;
     reviewContextHeightPx: number;
   };
+  ai: LocalAiSettings;
   dailyPrompts: {
     enabled: boolean;
     times: string[];
@@ -162,7 +173,7 @@ interface DailyReviewSummaryItem {
   hasLongEntry: boolean;
 }
 
-const SETTINGS_SCHEMA_VERSION = 8;
+const SETTINGS_SCHEMA_VERSION = 9;
 const moment = obsidianMoment as unknown as () => Moment;
 
 const WEEKDAYS: Weekday[] = [
@@ -403,6 +414,13 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     modalWidthPx: 860,
     modalMaxHeightVh: 86,
     reviewContextHeightPx: 360,
+  },
+  ai: {
+    enabled: false,
+    provider: "ollama",
+    baseUrl: "http://127.0.0.1:11434",
+    model: "llama3.2",
+    summaryProperty: "journalAISummary",
   },
   dailyPrompts: {
     enabled: true,
@@ -955,6 +973,105 @@ export default class JournalingSystemPlugin extends Plugin {
         );
       }
     });
+  }
+
+  getAiSummaryProperty(): string {
+    return (
+      this.settings.ai.summaryProperty.trim() ||
+      DEFAULT_SETTINGS.ai.summaryProperty
+    );
+  }
+
+  async writeReviewAiSummary(file: TFile, summary: string): Promise<void> {
+    const property = this.getAiSummaryProperty();
+    if (property.length === 0) {
+      return;
+    }
+
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      frontmatter[property] = summary.trim();
+    });
+  }
+
+  async checkLocalAiStatus(): Promise<string> {
+    const settings = normalizeLocalAiSettings(this.settings.ai);
+    const response = await requestUrl({
+      url: `${settings.baseUrl}/api/tags`,
+      method: "GET",
+      throw: false,
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Ollama returned HTTP ${response.status}.`);
+    }
+
+    const models = getOllamaModelNames(response.json);
+    const hasModel = ollamaModelExists(models, settings.model);
+    return hasModel
+      ? `Ollama is reachable and ${settings.model} is installed.`
+      : `Ollama is reachable. ${settings.model} is not installed yet.`;
+  }
+
+  async pullLocalAiModel(): Promise<string> {
+    const settings = normalizeLocalAiSettings(this.settings.ai);
+    const response = await requestUrl({
+      url: `${settings.baseUrl}/api/pull`,
+      method: "POST",
+      contentType: "application/json",
+      body: JSON.stringify({ model: settings.model, stream: false }),
+      throw: false,
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Ollama returned HTTP ${response.status}.`);
+    }
+
+    return `Downloaded or verified ${settings.model}.`;
+  }
+
+  async generateWeeklyAiSummary(
+    reviewFile: TFile,
+    dailySummary: DailyReviewSummaryItem[]
+  ): Promise<string> {
+    const settings = normalizeLocalAiSettings(this.settings.ai);
+    if (!settings.enabled) {
+      throw new Error("Local AI review assistance is disabled.");
+    }
+
+    if (dailySummary.length === 0) {
+      throw new Error("No daily context is available for this week.");
+    }
+
+    const sourceText = await this.createWeeklyAiSourceText(dailySummary);
+    const summary = await requestOllamaWeeklySummary(settings, sourceText);
+    await this.writeReviewAiSummary(reviewFile, summary);
+    return summary;
+  }
+
+  private async createWeeklyAiSourceText(
+    dailySummary: DailyReviewSummaryItem[]
+  ): Promise<string> {
+    const blocks: string[] = [];
+
+    for (const item of dailySummary) {
+      const file = this.app.vault.getFileByPath(item.path);
+      const longText = file
+        ? extractLongJournalEntryText(
+            await this.app.vault.read(file),
+            this.settings.dailyNote.longEntryHeading
+          )
+        : "";
+      const parts = [
+        `Date: ${item.label}`,
+        item.location ? `Location: ${item.location}` : "",
+        item.mood ? `Mood: ${item.mood}` : "",
+        item.shortText ? `Quick entry: ${truncateText(item.shortText, 900)}` : "",
+        longText ? `Long journal: ${truncateText(longText, 1800)}` : "",
+      ].filter((part) => part.length > 0);
+      blocks.push(parts.join("\n"));
+    }
+
+    return truncateText(blocks.join("\n\n---\n\n"), 18000);
   }
 
   async cleanupLegacyReviewScaffolding(file: TFile): Promise<void> {
@@ -1829,6 +1946,8 @@ class WeeklyReviewWizardModal extends Modal {
   private values = new Map<string, string | number | string[] | boolean>();
   private stepIndex = 0;
   private currentInput: JournalFieldInput | null = null;
+  private aiSummary = "";
+  private aiSummaryBusy = false;
 
   constructor(app: App, private readonly plugin: JournalingSystemPlugin) {
     super(app);
@@ -1855,6 +1974,9 @@ class WeeklyReviewWizardModal extends Modal {
       this.dailySummary = await this.plugin.getDailyReviewSummary("weekly");
       const frontmatter = this.app.metadataCache.getFileCache(this.reviewFile)?.frontmatter;
       this.initialFrontmatter = isRecord(frontmatter) ? { ...frontmatter } : {};
+      this.aiSummary = formatInitialTextValue(
+        this.initialFrontmatter[this.plugin.getAiSummaryProperty()]
+      );
 
       if (this.properties.length === 0) {
         this.close();
@@ -1885,6 +2007,7 @@ class WeeklyReviewWizardModal extends Modal {
     this.setTitle(`Weekly review wizard (${this.stepIndex + 1}/${this.properties.length})`);
 
     this.renderDailyContext(this.contentEl);
+    this.renderAiSummary(this.contentEl);
 
     const fieldEl = this.contentEl.createDiv({ cls: "journaling-system-field" });
     fieldEl.createEl("label", {
@@ -1982,6 +2105,64 @@ class WeeklyReviewWizardModal extends Modal {
         cls: "journaling-system-review-wizard-day-short",
         text: item.shortText || "No quick entry.",
       });
+    }
+  }
+
+  private renderAiSummary(containerEl: HTMLElement): void {
+    const details = containerEl.createEl("details", {
+      cls: "journaling-system-ai-summary",
+    });
+    details.open = this.aiSummary.length > 0 || this.plugin.settings.ai.enabled;
+    details.createEl("summary", {
+      text: "Local AI summary",
+      cls: "journaling-system-review-wizard-summary",
+    });
+
+    const body = details.createDiv({ cls: "journaling-system-ai-summary-body" });
+    if (this.aiSummary.length > 0) {
+      body.createEl("pre", {
+        text: this.aiSummary,
+        cls: "journaling-system-ai-summary-text",
+      });
+    } else {
+      body.createDiv({
+        text: this.plugin.settings.ai.enabled
+          ? "No AI summary has been generated for this weekly review yet."
+          : "Enable local AI review assistance in settings to generate a private weekly summary with Ollama.",
+        cls: "journaling-system-field-hint",
+      });
+    }
+
+    const actions = body.createDiv({ cls: "journaling-system-ai-summary-actions" });
+    new ButtonComponent(actions)
+      .setButtonText(this.aiSummary.length > 0 ? "Regenerate AI summary" : "Generate AI summary")
+      .setDisabled(!this.plugin.settings.ai.enabled || this.aiSummaryBusy)
+      .onClick(async () => {
+        await this.generateAiSummary();
+      });
+  }
+
+  private async generateAiSummary(): Promise<void> {
+    if (!this.reviewFile) {
+      return;
+    }
+
+    this.saveCurrentStepValue();
+    this.aiSummaryBusy = true;
+    this.renderStep();
+
+    try {
+      this.aiSummary = await this.plugin.generateWeeklyAiSummary(
+        this.reviewFile,
+        this.dailySummary
+      );
+      this.initialFrontmatter[this.plugin.getAiSummaryProperty()] = this.aiSummary;
+      new Notice("Generated local AI weekly summary.");
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "Could not generate AI summary.");
+    } finally {
+      this.aiSummaryBusy = false;
+      this.renderStep();
     }
   }
 
@@ -2311,6 +2492,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.displayReviewLevelSettings(containerEl, "Weekly", "weekly");
     this.displayReviewLevelSettings(containerEl, "Monthly", "monthly");
     this.displayReviewLevelSettings(containerEl, "Annual", "annual");
+    this.displayLocalAiSettings(containerEl);
     this.displayAppearanceSettings(containerEl);
   }
 
@@ -2350,6 +2532,9 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     });
     list.createEl("li", {
       text: "Daily, Weekly, Monthly, and Annual settings control each note type's prompt schedule, note naming, and level-specific review behavior.",
+    });
+    list.createEl("li", {
+      text: "Local AI settings optionally connect the weekly wizard to a local Ollama model and save generated guidance to a review property.",
     });
     list.createEl("li", {
       text: "Appearance settings control modal size and text size for the daily prompt and weekly review wizard.",
@@ -2768,6 +2953,117 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     }
 
     return "Annual reviews synthesize direction from monthly reviews. Keep annual properties high-level so the year view stays readable.";
+  }
+
+  private displayLocalAiSettings(containerEl: HTMLElement): void {
+    const section = createSettingsSection(containerEl, "Local AI settings");
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Optional local-only weekly review assistance. The plugin talks to Ollama on localhost, saves generated guidance to the configured review property, and does not send journal text to cloud services.",
+    });
+
+    new Setting(section)
+      .setName("Enable local AI review assistance")
+      .setDesc("Show AI summary generation in the weekly review wizard.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.ai.enabled)
+          .onChange(async (value) => {
+            this.plugin.settings.ai.enabled = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(section)
+      .setName("Provider")
+      .setDesc("Only Ollama is supported for now.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("ollama", "Ollama")
+          .setValue(this.plugin.settings.ai.provider)
+          .onChange(async () => {
+            this.plugin.settings.ai.provider = "ollama";
+            await this.plugin.saveSettings();
+          });
+      });
+
+    this.addTextSetting(
+      section,
+      "Ollama URL",
+      "Local Ollama server URL. Only localhost, 127.0.0.1, and [::1] URLs are accepted.",
+      this.plugin.settings.ai.baseUrl,
+      async (value) => {
+        const normalized = normalizeLocalAiBaseUrl(value);
+        if (normalized !== value.replace(/\/+$/g, "")) {
+          new Notice("Using local default Ollama URL.");
+        }
+        this.plugin.settings.ai.baseUrl = normalized;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addTextSetting(
+      section,
+      "Model",
+      "Ollama model used for weekly summaries. Small default: llama3.2.",
+      this.plugin.settings.ai.model,
+      async (value) => {
+        this.plugin.settings.ai.model =
+          value.trim() || DEFAULT_SETTINGS.ai.model;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addTextSetting(
+      section,
+      "AI summary property",
+      "Review-note property where generated weekly guidance is saved.",
+      this.plugin.settings.ai.summaryProperty,
+      async (value) => {
+        this.plugin.settings.ai.summaryProperty =
+          value.trim() || DEFAULT_SETTINGS.ai.summaryProperty;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    new Setting(section)
+      .setName("Ollama status")
+      .setDesc("Check whether the local server is reachable and whether the selected model is installed.")
+      .addButton((button) => {
+        button.setButtonText("Check Ollama").onClick(async () => {
+          try {
+            new Notice(await this.plugin.checkLocalAiStatus());
+          } catch (error) {
+            new Notice(
+              error instanceof Error
+                ? error.message
+                : "Could not reach Ollama on the configured local URL."
+            );
+          }
+        });
+      })
+      .addButton((button) => {
+        button.setButtonText("Download model").onClick(async () => {
+          const settings = normalizeLocalAiSettings(this.plugin.settings.ai);
+          const confirmed = window.confirm(
+            `Download or verify ${settings.model} with Ollama? This can take several minutes and uses Ollama's local model store.`
+          );
+          if (!confirmed) {
+            return;
+          }
+
+          try {
+            new Notice(`Downloading or verifying ${settings.model}...`);
+            new Notice(await this.plugin.pullLocalAiModel());
+          } catch (error) {
+            new Notice(
+              error instanceof Error
+                ? error.message
+                : "Could not download the selected Ollama model."
+            );
+          }
+        });
+      });
   }
 
   private displayAppearanceSettings(containerEl: HTMLElement): void {
@@ -3420,6 +3716,7 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   const savedSchemaVersion = getSavedSchemaVersion(migrated);
   const settings = mergeDefaults(defaults, migrated);
   migrateDefaultReviewFormats(settings, savedSchemaVersion);
+  settings.ai = normalizeLocalAiSettings(settings.ai);
   settings.ui.modalFontSizePx = normalizeModalFontSize(settings.ui.modalFontSizePx);
   settings.ui.modalWidthPx = normalizeModalWidth(settings.ui.modalWidthPx);
   settings.ui.modalMaxHeightVh = normalizeModalMaxHeight(
@@ -3920,6 +4217,48 @@ function normalizeDailyPromptBehavior(value: unknown): DailyPromptBehavior {
   return value === "if-no-quick-entry" ? value : "always";
 }
 
+function normalizeLocalAiSettings(value: unknown): LocalAiSettings {
+  const raw = isRecord(value) ? value : {};
+  return {
+    enabled: raw.enabled === true,
+    provider: "ollama",
+    baseUrl: normalizeLocalAiBaseUrl(raw.baseUrl),
+    model: normalizeLocalAiModel(raw.model),
+    summaryProperty: normalizeAiSummaryProperty(raw.summaryProperty),
+  };
+}
+
+function normalizeLocalAiBaseUrl(value: unknown): string {
+  const fallback = DEFAULT_SETTINGS.ai.baseUrl;
+  const raw = String(value ?? "").trim().replace(/\/+$/g, "");
+  if (raw.length === 0) {
+    return fallback;
+  }
+
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+    if ((url.protocol === "http:" || url.protocol === "https:") && isLocalHost) {
+      return url.origin;
+    }
+  } catch {
+    return fallback;
+  }
+
+  return fallback;
+}
+
+function normalizeLocalAiModel(value: unknown): string {
+  const model = String(value ?? "").trim();
+  return model.length > 0 ? model : DEFAULT_SETTINGS.ai.model;
+}
+
+function normalizeAiSummaryProperty(value: unknown): string {
+  const property = String(value ?? "").trim();
+  return property.length > 0 ? property : DEFAULT_SETTINGS.ai.summaryProperty;
+}
+
 function formatBasePropertyReference(property: string): string {
   const clean = property.trim();
   if (clean === "file.name" || /^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) {
@@ -4004,7 +4343,10 @@ function getAvailableBasePropertiesFromSettings(
     automatic.year,
     ...(kind === "daily"
       ? settings.properties.map((property) => property.property)
-      : settings.reviews.reviewProperties.map((property) => property.property)),
+      : [
+          ...settings.reviews.reviewProperties.map((property) => property.property),
+          settings.ai.summaryProperty,
+        ]),
   ]);
 }
 
@@ -4420,11 +4762,30 @@ function hasLongJournalEntryContent(content: string, heading: string): boolean {
   return stripLongEntryNonContent(section).trim().length > 0;
 }
 
+function extractLongJournalEntryText(content: string, heading: string): string {
+  const headingMatch = findHeadingLine(content, heading);
+  if (!headingMatch) {
+    return "";
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  const section = content.slice(headingMatch.end, sectionEnd);
+  return stripLongEntryNonContent(section).replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function stripLongEntryNonContent(section: string): string {
   return section
     .replace(LONG_ENTRY_START_MARKER, "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .trim();
+}
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(0, maxLength - 20)).trim()}... [truncated]`;
 }
 
 function findJournalCursorOffset(content: string, heading: string): number {
@@ -4646,6 +5007,94 @@ function normalizeModalMaxHeight(value: unknown): number {
 function normalizeReviewContextHeight(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number(value);
   return clamp(Number.isFinite(parsed) ? Math.round(parsed) : 360, 180, 560);
+}
+
+async function requestOllamaWeeklySummary(
+  settings: LocalAiSettings,
+  sourceText: string
+): Promise<string> {
+  const response = await requestUrl({
+    url: `${settings.baseUrl}/api/chat`,
+    method: "POST",
+    contentType: "application/json",
+    body: JSON.stringify({
+      model: settings.model,
+      stream: false,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a private local journaling assistant. Use only the supplied journal notes. Be concise, concrete, and reflective. Do not diagnose, moralize, or invent facts.",
+        },
+        {
+          role: "user",
+          content: buildWeeklyAiPrompt(sourceText),
+        },
+      ],
+      options: {
+        temperature: 0.3,
+      },
+    }),
+    throw: false,
+  });
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Ollama returned HTTP ${response.status}.`);
+  }
+
+  const content = response.json?.message?.content;
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error("Ollama returned an empty summary.");
+  }
+
+  return content.trim();
+}
+
+function buildWeeklyAiPrompt(sourceText: string): string {
+  return [
+    "Summarize this week's journal notes as guidance for a weekly review.",
+    "",
+    "Return a compact Markdown note with these headings:",
+    "- Patterns",
+    "- Highlights",
+    "- Difficulties",
+    "- Improvements to consider",
+    "- Reflection prompts",
+    "",
+    "Keep it useful for self-reflection. Prefer short bullets. Do not copy long passages verbatim.",
+    "",
+    "Source notes:",
+    sourceText,
+  ].join("\n");
+}
+
+function getOllamaModelNames(value: unknown): string[] {
+  if (!isRecord(value) || !Array.isArray(value.models)) {
+    return [];
+  }
+
+  return value.models
+    .flatMap((model) => {
+      if (!isRecord(model)) {
+        return [];
+      }
+
+      return [model.name, model.model]
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    });
+}
+
+function ollamaModelExists(models: string[], configuredModel: string): boolean {
+  const normalizedConfigured = normalizeOllamaModelName(configuredModel);
+  return models.some(
+    (model) => normalizeOllamaModelName(model) === normalizedConfigured
+  );
+}
+
+function normalizeOllamaModelName(model: string): string {
+  return model.trim().replace(/:latest$/i, "");
 }
 
 function ensureMarkdownExtension(fileName: string): string {
