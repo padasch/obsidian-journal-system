@@ -73,10 +73,11 @@ workflow and how the settings sections relate to each other.
 - Bases settings control generated Obsidian Base blocks, including the editable
   Review Fields Base and source-note Bases. Select which properties should be
   visible and optionally set column widths for fields that need more room.
-- Daily settings control prompt schedule and daily note creation. Weekly,
-  monthly, and annual settings control the review prompt schedule, review note
-  name format, checklist prompts, and whether that level embeds daily long
-  entries.
+- Daily settings control prompt schedule, whether scheduled prompts always
+  appear or only appear when today's quick entry is empty, and daily note
+  creation. Weekly, monthly, and annual settings control the review prompt
+  schedule, review note name format, checklist prompts, and whether that level
+  embeds daily long entries.
 - Default review note name formats are `YYYY - [Week] WW`, `YYYY-MM MMMM`, and
   `YYYY [Annual Review]`.
 
@@ -99,6 +100,9 @@ one value on each line.
 
 When the journaling modal is reopened for a daily note that already has journal
 properties, existing values are prefilled so the entry can be continued or edited.
+Scheduled daily prompts can be set to always ask, or to ask only when the current
+daily note has no quick entry yet. The command `Open daily journal prompt` remains
+manual and always opens the modal.
 
 Daily and review notes receive `journalType` frontmatter. Daily notes also receive
 period keys such as `journalWeek`, `journalMonth`, and `journalYear`.

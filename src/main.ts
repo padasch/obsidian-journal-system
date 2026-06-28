@@ -38,6 +38,7 @@ type JournalType = "daily" | ReviewLevel;
 type BaseRowHeight = "default" | "short" | "medium" | "tall" | "extra-tall";
 type BaseColumnSizes = Record<string, number>;
 type BasePropertyListKey = "baseProperties" | "reviewBaseProperties";
+type DailyPromptBehavior = "always" | "if-no-quick-entry";
 
 interface JournalPropertyDefinition {
   id: string;
@@ -74,6 +75,7 @@ interface JournalingSystemSettings {
     weekdays: Weekday[];
     snoozeMinutes: number;
     catchUpMissedPrompts: boolean;
+    promptBehavior: DailyPromptBehavior;
     lastPromptKey: string;
     snoozedUntil: number;
   };
@@ -194,6 +196,11 @@ const BASE_ROW_HEIGHT_LABELS: Record<BaseRowHeight, string> = {
   medium: "Medium",
   tall: "Tall",
   "extra-tall": "Extra tall",
+};
+
+const DAILY_PROMPT_BEHAVIOR_LABELS: Record<DailyPromptBehavior, string> = {
+  always: "Always prompt",
+  "if-no-quick-entry": "Only when quick entry is empty",
 };
 
 const DEFAULT_REVIEW_BASE_PROPERTIES = [
@@ -397,6 +404,7 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     weekdays: [...WEEKDAYS],
     snoozeMinutes: 30,
     catchUpMissedPrompts: true,
+    promptBehavior: "always",
     lastPromptKey: "",
     snoozedUntil: 0,
   },
@@ -552,6 +560,14 @@ export default class JournalingSystemPlugin extends Plugin {
     return longProperty ?? DEFAULT_PROPERTIES[1];
   }
 
+  getShortProperty(): JournalPropertyDefinition | null {
+    return (
+      this.settings.properties.find(
+        (property) => property.enabled && property.role === "short"
+      ) ?? null
+    );
+  }
+
   async syncLongEntryStatus(file: TFile): Promise<boolean> {
     const content = await this.app.vault.read(file);
     const hasContent = hasLongJournalEntryContent(
@@ -626,9 +642,57 @@ export default class JournalingSystemPlugin extends Plugin {
       return;
     }
 
+    const shouldPrompt = await this.shouldOpenDailyPrompt(now);
     prompts.lastPromptKey = promptKey;
     await this.saveSettings();
+    if (!shouldPrompt) {
+      return;
+    }
+
     new DailyPromptDecisionModal(this.app, this, dueTime).open();
+  }
+
+  async shouldOpenDailyPrompt(now = moment()): Promise<boolean> {
+    if (this.settings.dailyPrompts.promptBehavior !== "if-no-quick-entry") {
+      return true;
+    }
+
+    try {
+      return !(await this.dailyNoteHasQuickEntry(now));
+    } catch (error) {
+      console.error("Journaling System failed to check daily quick entry", error);
+      return true;
+    }
+  }
+
+  async dailyNoteHasQuickEntry(now = moment()): Promise<boolean> {
+    const shortProperty = this.getShortProperty();
+    const propertyName = shortProperty?.property.trim() ?? "";
+    const file = this.app.vault.getFileByPath(this.getDailyNotePath(now));
+
+    if (!file) {
+      return false;
+    }
+
+    if (propertyName.length > 0) {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (
+        isRecord(frontmatter) &&
+        flattenPropertyValue(frontmatter[propertyName]).some(
+          (entry) => entry.trim().length > 0
+        )
+      ) {
+        return true;
+      }
+    }
+
+    const heading = this.settings.dailyNote.shortEntrySectionHeading.trim();
+    if (heading.length === 0) {
+      return false;
+    }
+
+    const content = await this.app.vault.read(file);
+    return extractNormalizedCaptureEntries(content, heading).size > 0;
   }
 
   async checkReviewPrompts(now = moment()): Promise<void> {
@@ -2454,6 +2518,24 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       });
 
     new Setting(section)
+      .setName("Prompt behavior")
+      .setDesc("Choose whether scheduled daily prompts always appear, or only appear when today's quick-entry field is still empty.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOptions(DAILY_PROMPT_BEHAVIOR_LABELS)
+          .setValue(
+            normalizeDailyPromptBehavior(
+              this.plugin.settings.dailyPrompts.promptBehavior
+            )
+          )
+          .onChange(async (value) => {
+            this.plugin.settings.dailyPrompts.promptBehavior =
+              normalizeDailyPromptBehavior(value);
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(section)
       .setName("Times")
       .setDesc("Prompt times in 24-hour format, separated by commas. Example: 09:00, 20:00.")
       .addText((text) => {
@@ -3265,6 +3347,9 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   const settings = mergeDefaults(defaults, migrated);
   migrateDefaultReviewFormats(settings, savedSchemaVersion);
   settings.ui.modalFontSizePx = normalizeModalFontSize(settings.ui.modalFontSizePx);
+  settings.dailyPrompts.promptBehavior = normalizeDailyPromptBehavior(
+    settings.dailyPrompts.promptBehavior
+  );
   settings.properties = normalizePropertyDefinitions(settings.properties);
   settings.reviews.baseProperties = normalizeDailyBaseProperties(
     settings.reviews.baseProperties
@@ -3740,6 +3825,10 @@ function normalizeBaseRowHeight(value: unknown): BaseRowHeight {
     value === "default"
     ? value
     : "extra-tall";
+}
+
+function normalizeDailyPromptBehavior(value: unknown): DailyPromptBehavior {
+  return value === "if-no-quick-entry" ? value : "always";
 }
 
 function formatBasePropertyReference(property: string): string {
