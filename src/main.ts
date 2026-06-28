@@ -1729,6 +1729,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     containerEl.addClass("journaling-system-settings");
 
     containerEl.createEl("h1", { text: "Journaling System" });
+    this.displaySystemIdea(containerEl);
     this.displayBasicSettings(containerEl);
     this.displayPropertySettings(containerEl);
     this.displayBaseSettings(containerEl);
@@ -1736,6 +1737,30 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.displayReviewLevelSettings(containerEl, "Weekly", "weekly");
     this.displayReviewLevelSettings(containerEl, "Monthly", "monthly");
     this.displayReviewLevelSettings(containerEl, "Annual", "annual");
+  }
+
+  private displaySystemIdea(containerEl: HTMLElement): void {
+    const details = containerEl.createEl("details", {
+      cls: "journaling-system-system-note",
+    });
+    details.createEl("summary", {
+      text: "How this journaling system is meant to work",
+      cls: "journaling-system-system-note-summary",
+    });
+
+    const body = details.createDiv({ cls: "journaling-system-system-note-body" });
+    body.createEl("p", {
+      text: "Daily notes are the raw signal: quick thoughts, optional long writing, mood, and location. They should stay lightweight enough that you actually use them.",
+    });
+    body.createEl("p", {
+      text: "Weekly reviews are the first interpretation layer: scan the daily signal, then name highlights, difficulties, improvements, and optional life/work reflections.",
+    });
+    body.createEl("p", {
+      text: "Monthly and annual reviews synthesize patterns from previous review notes. Use written reflection for nuance, and use multiselect fields such as Themes for recurring labels you want to compare in Bases.",
+    });
+    body.createEl("p", {
+      text: "Themes are not meant as daily topics. Treat them as short recurring patterns, for example sleep/recovery, context switching, creative momentum, or relationships. A small set of clear labels is more useful than tagging everything.",
+    });
   }
 
   private displayBasicSettings(containerEl: HTMLElement): void {

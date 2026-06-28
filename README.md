@@ -22,6 +22,17 @@ long-form journal heading.
 - Generate review workspaces with checklist prompts, source Bases, and fillable
   review properties while preserving user-written reflection.
 
+## Review philosophy
+
+Daily notes should stay fast and raw. Higher-level review properties are meant to
+be extracted from the daily signal rather than forced into every daily entry.
+
+`journalThemes` is a review-level multiselect for recurring patterns you want to
+compare over time, not a replacement for written reflection. Use short labels such
+as `sleep/recovery`, `context switching`, or `creative momentum` when a pattern
+keeps appearing. Write the nuance in the review reflection, then use Themes as a
+small, queryable index for Bases.
+
 ## Current settings
 
 The settings tab is organized into:
