@@ -455,7 +455,7 @@ export default class JournalingSystemPlugin extends Plugin {
 
     this.addCommand({
       id: "open-journaling-prompt",
-      name: "Open journaling prompt",
+      name: "Open daily journal prompt",
       callback: () => {
         new JournalingPromptModal(this.app, this).open();
       },

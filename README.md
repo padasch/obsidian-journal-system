@@ -53,7 +53,7 @@ the parsed folder underneath the setting.
 
 ## Current commands
 
-- `Journaling System: Open journaling prompt`
+- `Journaling System: Open daily journal prompt`
 - `Journaling System: Open long journal entry`
 - `Journaling System: Open weekly review`
 - `Journaling System: Open monthly review`
