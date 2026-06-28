@@ -22,6 +22,10 @@ long-form journal heading.
 - Prompt for daily, weekly, monthly, and annual reviews on configurable schedules.
 - Generate review workspaces with checklist prompts, source Bases, and fillable
   review properties while preserving user-written reflection.
+- Add a one-row review-fields Base to each review note so review properties can
+  be edited in the note body instead of only through YAML.
+- Try a weekly review wizard that shows concise daily context, steps through
+  weekly review properties, then opens the review note for further writing.
 
 ## Review philosophy
 
@@ -66,9 +70,9 @@ workflow and how the settings sections relate to each other.
 - Review properties define the condensation fields. These are where highlights,
   difficulties, improvements, life/work reflections, and themes emerge from daily
   writing.
-- Bases settings control generated Obsidian Base blocks. Select which properties
-  should be visible and optionally set column widths for fields that need more
-  room.
+- Bases settings control generated Obsidian Base blocks, including the editable
+  Review Fields Base and source-note Bases. Select which properties should be
+  visible and optionally set column widths for fields that need more room.
 - Daily settings control prompt schedule and daily note creation. Weekly,
   monthly, and annual settings control the review prompt schedule, review note
   name format, checklist prompts, and whether that level embeds daily long
@@ -83,6 +87,7 @@ the parsed folder underneath the setting.
 - `Journaling System: Open daily journal prompt`
 - `Journaling System: Open long journal entry`
 - `Journaling System: Open weekly review`
+- `Journaling System: Start weekly review wizard`
 - `Journaling System: Open monthly review`
 - `Journaling System: Open annual review`
 
@@ -96,11 +101,17 @@ properties, existing values are prefilled so the entry can be continued or edite
 Daily and review notes receive `journalType` frontmatter. Daily notes also receive
 period keys such as `journalWeek`, `journalMonth`, and `journalYear`.
 
-Generated weekly reviews include a checklist, a Base of matching daily notes, and
-long-entry embeds by default. Generated monthly reviews use weekly reviews as their
-primary Base source. Generated annual reviews use monthly reviews as their primary
-Base source. Monthly and annual reviews can optionally include an additional daily
-note Base for deeper browsing.
+Generated reviews include a Review Fields Base filtered to the current note, so
+review properties can be edited directly from the review note. Generated weekly
+reviews also include a Base of matching daily notes and long-entry embeds by
+default. Generated monthly reviews use weekly reviews as their primary Base
+source. Generated annual reviews use monthly reviews as their primary Base source.
+Monthly and annual reviews can optionally include an additional daily note Base
+for deeper browsing.
+
+The weekly review wizard is a trial flow. It creates or opens the weekly review,
+shows concise daily context, steps through the enabled weekly review properties,
+saves the entered properties, and then opens the note at the reflection heading.
 
 Review Base columns can be selected separately for daily-source Bases and
 review-source Bases, with an optional column-width field for each property. Default

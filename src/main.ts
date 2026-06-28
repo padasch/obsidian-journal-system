@@ -143,6 +143,20 @@ interface JournalValue {
   value: string | number | string[] | boolean;
 }
 
+interface ReviewValue {
+  definition: ReviewPropertyDefinition;
+  value: string | number | string[] | boolean;
+}
+
+interface DailyReviewSummaryItem {
+  label: string;
+  path: string;
+  shortText: string;
+  location: string;
+  mood: string;
+  hasLongEntry: boolean;
+}
+
 const SETTINGS_SCHEMA_VERSION = 7;
 const moment = obsidianMoment as unknown as () => Moment;
 
@@ -241,6 +255,7 @@ const LEGACY_LONG_ENTRIES_PLACEHOLDER =
   "<!-- Long-entry embeds will be generated in a later milestone. -->";
 const LONG_ENTRY_START_MARKER =
   "<!-- Journaling System: long journal entry starts here. Write below this line. -->";
+const REVIEW_FIELDS_HEADING = "Review Fields";
 const REVIEW_ROLLUP_START = "<!-- JOURNALING-SYSTEM:ROLLUP:START -->";
 const REVIEW_ROLLUP_END = "<!-- JOURNALING-SYSTEM:ROLLUP:END -->";
 
@@ -480,6 +495,14 @@ export default class JournalingSystemPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "start-weekly-review-wizard",
+      name: "Start weekly review wizard",
+      callback: () => {
+        new WeeklyReviewWizardModal(this.app, this).open();
+      },
+    });
+
+    this.addCommand({
       id: "open-monthly-review",
       name: "Open monthly review",
       callback: async () => {
@@ -714,6 +737,7 @@ export default class JournalingSystemPlugin extends Plugin {
       await this.writeReviewProperties(existing, level, now);
       await this.cleanupLegacyReviewScaffolding(existing);
       await this.ensureReviewChecklist(existing, level);
+      await this.ensureReviewFieldsBaseBlock(existing, level);
       await this.ensureReviewBaseBlock(existing, level, now);
       await this.ensureHigherReviewDailyBaseBlock(existing, level, now);
       await this.ensureReviewLongEntryEmbeds(existing, level, now);
@@ -748,6 +772,13 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     if (this.settings.reviews.includeInlineBases) {
+      lines.push(
+        `## ${REVIEW_FIELDS_HEADING}`,
+        "",
+        ...this.createReviewFieldsBaseBlock(level),
+        ""
+      );
+
       lines.push(
         `## ${this.settings.reviews.sourceNotesHeading}`,
         "",
@@ -824,6 +855,37 @@ export default class JournalingSystemPlugin extends Plugin {
     });
   }
 
+  async writeReviewValues(
+    file: TFile,
+    level: ReviewLevel,
+    values: ReviewValue[],
+    now = moment()
+  ): Promise<void> {
+    const automaticFrontmatter = this.getAutomaticFrontmatter(level, now);
+    const context = this.getTodayContext(now);
+
+    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      for (const [property, value] of Object.entries(automaticFrontmatter)) {
+        frontmatter[property] = value;
+      }
+
+      for (const { definition, value } of values) {
+        const key = definition.property.trim();
+        if (!definition.enabled || key.length === 0 || !definition.levels.includes(level)) {
+          continue;
+        }
+
+        const journalDefinition = reviewPropertyToJournalProperty(definition);
+        frontmatter[key] = toFrontmatterValue(
+          journalDefinition,
+          frontmatter[key],
+          value,
+          context.time
+        );
+      }
+    });
+  }
+
   async cleanupLegacyReviewScaffolding(file: TFile): Promise<void> {
     const content = await this.app.vault.read(file);
     const withoutRollup = removeManagedSection(
@@ -835,6 +897,40 @@ export default class JournalingSystemPlugin extends Plugin {
 
     if (withoutRollup !== content) {
       await this.app.vault.modify(file, withoutRollup);
+    }
+  }
+
+  async ensureReviewFieldsBaseBlock(file: TFile, level: ReviewLevel): Promise<void> {
+    if (!this.settings.reviews.includeInlineBases) {
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+    const block = this.createReviewFieldsBaseBlock(level).join("\n");
+    const updated = replaceGeneratedBaseBlockInSection(
+      content,
+      REVIEW_FIELDS_HEADING,
+      block
+    );
+
+    if (updated && updated !== content) {
+      await this.app.vault.modify(file, updated);
+      return;
+    }
+
+    if (sectionContainsBaseBlock(content, REVIEW_FIELDS_HEADING)) {
+      return;
+    }
+
+    const withInsertedBlock = sectionExists(content, REVIEW_FIELDS_HEADING)
+      ? insertBlockUnderHeading(content, REVIEW_FIELDS_HEADING, block)
+      : insertSectionAfterTitle(
+          content,
+          [`## ${REVIEW_FIELDS_HEADING}`, "", block].join("\n")
+        );
+
+    if (withInsertedBlock !== content) {
+      await this.app.vault.modify(file, withInsertedBlock);
     }
   }
 
@@ -1022,6 +1118,40 @@ export default class JournalingSystemPlugin extends Plugin {
     return [...configuredItems, ...propertyItems].map((item) => `- [ ] ${item}`);
   }
 
+  createReviewFieldsBaseBlock(level: ReviewLevel): string[] {
+    const columns = this.getReviewFieldsBaseProperties(level);
+    const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
+    const columnSizes = this.getReviewBaseColumnSizes(columns);
+    const displayNames = getBasePropertyDisplayNames(columns);
+
+    return [
+      "```base",
+      "filters:",
+      "  and:",
+      "    - file.path == this.file.path",
+      ...formatBasePropertyDisplayNameBlock(displayNames),
+      "views:",
+      "  - type: table",
+      "    name: Review fields",
+      ...(rowHeight === "default" ? [] : [`    rowHeight: ${rowHeight}`]),
+      ...(columnSizes.length > 0
+        ? [
+            "    columnSize:",
+            ...columnSizes.map(
+              ([property, size]) => `      ${formatBaseColumnSizeKey(property)}: ${size}`
+            ),
+          ]
+        : []),
+      ...(columns.length > 0
+        ? [
+            "    order:",
+            ...columns.map((property) => `      - ${formatBasePropertyReference(property)}`),
+          ]
+        : []),
+      "```",
+    ];
+  }
+
   createReviewBaseBlock(level: ReviewLevel, now = moment()): string[] {
     const source = this.getReviewSource(level, now);
     const typeProperty =
@@ -1167,6 +1297,82 @@ export default class JournalingSystemPlugin extends Plugin {
     };
   }
 
+  getDailySourceFilesForReview(level: ReviewLevel, now = moment()): TFile[] {
+    const automatic = this.settings.automaticProperties;
+    const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
+    const dateProperty = automatic.date.trim() || DEFAULT_SETTINGS.automaticProperties.date;
+    const period = this.getDailySourceForReview(level, now).period;
+
+    return this.app.vault
+      .getMarkdownFiles()
+      .filter((file) => {
+        const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+        if (!isRecord(frontmatter)) {
+          return false;
+        }
+
+        const journalType = frontmatter[typeProperty];
+        if (journalType !== undefined && String(journalType) !== "daily") {
+          return false;
+        }
+
+        return frontmatterMatchesReviewPeriod(frontmatter, period, dateProperty, level);
+      })
+      .sort((a, b) => {
+        const aFrontmatter = this.app.metadataCache.getFileCache(a)?.frontmatter;
+        const bFrontmatter = this.app.metadataCache.getFileCache(b)?.frontmatter;
+        const aDate = getJournalDateKey(
+          a,
+          isRecord(aFrontmatter) ? aFrontmatter : {},
+          dateProperty
+        );
+        const bDate = getJournalDateKey(
+          b,
+          isRecord(bFrontmatter) ? bFrontmatter : {},
+          dateProperty
+        );
+        return aDate.localeCompare(bDate) || a.path.localeCompare(b.path);
+      });
+  }
+
+  async getDailyReviewSummary(
+    level: ReviewLevel,
+    now = moment()
+  ): Promise<DailyReviewSummaryItem[]> {
+    const dateProperty =
+      this.settings.automaticProperties.date.trim() ||
+      DEFAULT_SETTINGS.automaticProperties.date;
+    const shortProperty =
+      this.settings.properties.find((property) => property.role === "short")?.property ??
+      DEFAULT_PROPERTIES[0].property;
+    const locationProperty =
+      this.settings.properties.find((property) => property.role === "location")?.property ??
+      DEFAULT_PROPERTIES[2].property;
+    const moodProperty =
+      this.settings.properties.find((property) => property.role === "mood")?.property ??
+      DEFAULT_PROPERTIES[3].property;
+
+    const items: DailyReviewSummaryItem[] = [];
+    for (const file of this.getDailySourceFilesForReview(level, now)) {
+      const hasLongEntry = await this.syncLongEntryStatus(file);
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+      items.push({
+        label: formatJournalEmbedDateLabel(file, frontmatterRecord, dateProperty).replace(
+          /^\*\*|\*\*$/g,
+          ""
+        ),
+        path: file.path,
+        shortText: flattenPropertyValue(frontmatterRecord[shortProperty]).join("; "),
+        location: flattenPropertyValue(frontmatterRecord[locationProperty]).join("; "),
+        mood: flattenPropertyValue(frontmatterRecord[moodProperty]).join("; "),
+        hasLongEntry,
+      });
+    }
+
+    return items;
+  }
+
   getReviewProperties(level: ReviewLevel): ReviewPropertyDefinition[] {
     return this.settings.reviews.reviewProperties.filter(
       (property) =>
@@ -1292,6 +1498,12 @@ export default class JournalingSystemPlugin extends Plugin {
     return level === "weekly"
       ? normalizeDailyBaseProperties(this.settings.reviews.baseProperties)
       : normalizeReviewBaseProperties(this.settings.reviews.reviewBaseProperties);
+  }
+
+  getReviewFieldsBaseProperties(level: ReviewLevel): string[] {
+    return dedupeProperties(
+      this.getReviewProperties(level).map((property) => property.property)
+    );
   }
 
   getReviewBaseColumnSizes(columns: string[]): Array<[string, number]> {
@@ -1528,6 +1740,223 @@ class ReviewPromptDecisionModal extends Modal {
           this.close();
         });
       });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+class WeeklyReviewWizardModal extends Modal {
+  private reviewFile: TFile | null = null;
+  private properties: ReviewPropertyDefinition[] = [];
+  private dailySummary: DailyReviewSummaryItem[] = [];
+  private initialFrontmatter: Record<string, unknown> = {};
+  private values = new Map<string, string | number | string[] | boolean>();
+  private stepIndex = 0;
+  private currentInput: JournalFieldInput | null = null;
+
+  constructor(app: App, private readonly plugin: JournalingSystemPlugin) {
+    super(app);
+  }
+
+  onOpen(): void {
+    void this.load();
+  }
+
+  private async load(): Promise<void> {
+    this.modalEl.addClass("journaling-system-modal-shell");
+    this.modalEl.style.setProperty(
+      "--journaling-system-modal-font-size",
+      `${normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx)}px`
+    );
+    this.contentEl.addClass("journaling-system-modal");
+    this.setTitle("Weekly review wizard");
+    this.contentEl.empty();
+    this.contentEl.createDiv({
+      cls: "journaling-system-field-hint",
+      text: "Preparing weekly review context...",
+    });
+
+    try {
+      this.reviewFile = await this.plugin.getOrCreateReviewNote("weekly");
+      this.properties = this.plugin.getReviewProperties("weekly");
+      this.dailySummary = await this.plugin.getDailyReviewSummary("weekly");
+      const frontmatter = this.app.metadataCache.getFileCache(this.reviewFile)?.frontmatter;
+      this.initialFrontmatter = isRecord(frontmatter) ? { ...frontmatter } : {};
+
+      if (this.properties.length === 0) {
+        this.close();
+        await this.plugin.openFileAtHeading(
+          this.reviewFile,
+          this.plugin.settings.reviews.reflectionHeading
+        );
+        new Notice("No weekly review properties are enabled.");
+        return;
+      }
+
+      this.renderStep();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "Could not start weekly review wizard.");
+      this.close();
+    }
+  }
+
+  private renderStep(): void {
+    const property = this.properties[this.stepIndex];
+    if (!property) {
+      void this.finish();
+      return;
+    }
+
+    this.currentInput = null;
+    this.contentEl.empty();
+    this.setTitle(`Weekly review wizard (${this.stepIndex + 1}/${this.properties.length})`);
+
+    this.renderDailyContext(this.contentEl);
+
+    const fieldEl = this.contentEl.createDiv({ cls: "journaling-system-field" });
+    fieldEl.createEl("label", {
+      text: property.label,
+      cls: "journaling-system-field-label",
+    });
+    if (property.placeholder.trim().length > 0) {
+      fieldEl.createDiv({
+        text: property.placeholder,
+        cls: "journaling-system-field-hint",
+      });
+    }
+
+    const definition = reviewPropertyToJournalProperty(property);
+    this.currentInput = createJournalInput(
+      this.app,
+      this.plugin,
+      fieldEl,
+      definition,
+      this.values.get(property.id) ?? this.initialFrontmatter[property.property]
+    );
+
+    const buttonRow = this.contentEl.createDiv({ cls: "journaling-system-modal-actions" });
+    new ButtonComponent(buttonRow)
+      .setButtonText("Back")
+      .setDisabled(this.stepIndex === 0)
+      .onClick(() => {
+        this.saveCurrentStepValue();
+        this.stepIndex = Math.max(0, this.stepIndex - 1);
+        this.renderStep();
+      });
+    new ButtonComponent(buttonRow)
+      .setButtonText("Skip")
+      .onClick(() => {
+        this.stepIndex += 1;
+        this.renderStep();
+      });
+    new ButtonComponent(buttonRow)
+      .setButtonText(this.stepIndex === this.properties.length - 1 ? "Finish" : "Next")
+      .setCta()
+      .onClick(async () => {
+        this.saveCurrentStepValue();
+        if (this.stepIndex === this.properties.length - 1) {
+          await this.finish();
+          return;
+        }
+
+        this.stepIndex += 1;
+        this.renderStep();
+      });
+    new ButtonComponent(buttonRow)
+      .setButtonText("Cancel")
+      .onClick(() => {
+        this.close();
+      });
+  }
+
+  private renderDailyContext(containerEl: HTMLElement): void {
+    const details = containerEl.createEl("details", {
+      cls: "journaling-system-review-wizard-context",
+    });
+    details.open = true;
+    details.createEl("summary", {
+      text: `Daily context (${this.dailySummary.length} notes)`,
+      cls: "journaling-system-review-wizard-summary",
+    });
+
+    const body = details.createDiv({ cls: "journaling-system-review-wizard-context-body" });
+    if (this.dailySummary.length === 0) {
+      body.createDiv({
+        cls: "journaling-system-field-hint",
+        text: "No daily notes with matching journal properties were found for this week.",
+      });
+      return;
+    }
+
+    for (const item of this.dailySummary) {
+      const row = body.createDiv({ cls: "journaling-system-review-wizard-day" });
+      row.createDiv({
+        cls: "journaling-system-review-wizard-day-title",
+        text: item.label,
+      });
+      const metaParts = [
+        item.location ? `Location: ${item.location}` : "",
+        item.mood ? `Mood: ${item.mood}` : "",
+        item.hasLongEntry ? "Long entry" : "",
+      ].filter((part) => part.length > 0);
+      if (metaParts.length > 0) {
+        row.createDiv({
+          cls: "journaling-system-review-wizard-day-meta",
+          text: metaParts.join(" · "),
+        });
+      }
+      row.createDiv({
+        cls: "journaling-system-review-wizard-day-short",
+        text: item.shortText || "No quick entry.",
+      });
+    }
+  }
+
+  private saveCurrentStepValue(): void {
+    const property = this.properties[this.stepIndex];
+    if (!property || !this.currentInput) {
+      return;
+    }
+
+    const value = this.currentInput.getValue();
+    if (isEmptyJournalValue(value)) {
+      return;
+    }
+
+    this.values.set(property.id, value);
+  }
+
+  private async finish(): Promise<void> {
+    if (!this.reviewFile) {
+      this.close();
+      return;
+    }
+
+    const values: ReviewValue[] = [];
+    for (const property of this.properties) {
+      const value = this.values.get(property.id);
+      if (value === undefined || isEmptyJournalValue(value)) {
+        continue;
+      }
+
+      values.push({ definition: property, value });
+    }
+
+    try {
+      if (values.length > 0) {
+        await this.plugin.writeReviewValues(this.reviewFile, "weekly", values);
+      }
+      this.close();
+      await this.plugin.openFileAtHeading(
+        this.reviewFile,
+        this.plugin.settings.reviews.reflectionHeading
+      );
+      new Notice("Weekly review wizard complete.");
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "Could not save weekly review.");
+    }
   }
 
   onClose(): void {
@@ -1848,7 +2277,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       text: "Property settings define the YAML property names and the fields shown in daily and review notes.",
     });
     list.createEl("li", {
-      text: "Bases settings control which source-note columns appear when review notes embed Obsidian Bases.",
+      text: "Bases settings control the editable Review Fields Base and the source-note columns shown in generated Obsidian Bases.",
     });
     list.createEl("li", {
       text: "Daily, Weekly, Monthly, and Annual settings control each note type's prompt schedule, note naming, and level-specific review behavior.",
@@ -1954,13 +2383,13 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     const section = createSettingsSection(containerEl, "Bases settings shared across all notes");
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "Bases are generated into review notes so you can browse the underlying daily or review notes without copying their full content.",
+      text: "Bases are generated into review notes so you can edit review fields in place and browse the underlying daily or review notes without copying their full content.",
     });
 
     this.addToggleSetting(
       section,
       "Inline Bases",
-      "Add Obsidian Base blocks to generated review notes. Turn this off if you only want headings, checklists, reflection, and long-entry embeds.",
+      "Add Obsidian Base blocks to generated review notes, including the editable Review Fields Base and source-note Bases.",
       "includeInlineBases"
     );
     this.addToggleSetting(
@@ -3038,6 +3467,21 @@ function emptyReviewPropertyValue(
   return "";
 }
 
+function reviewPropertyToJournalProperty(
+  property: ReviewPropertyDefinition
+): JournalPropertyDefinition {
+  return {
+    id: property.id,
+    enabled: property.enabled,
+    label: property.label,
+    property: property.property,
+    placeholder: property.placeholder,
+    type: property.type,
+    role: "custom",
+    builtIn: property.builtIn,
+  };
+}
+
 function normalizeReviewPropertyDefinitions(
   properties: ReviewPropertyDefinition[]
 ): ReviewPropertyDefinition[] {
@@ -3507,7 +3951,7 @@ function replaceGeneratedBaseBlockInSection(
   }
 
   if (
-    !/name:\s+(Daily notes in this|Weekly reviews in this|Monthly reviews in this|Journal source notes)/.test(
+    !/name:\s+(Review fields|Daily notes in this|Weekly reviews in this|Monthly reviews in this|Journal source notes)/.test(
       match[0]
     )
   ) {

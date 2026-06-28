@@ -283,6 +283,53 @@
   font-size: calc(var(--journaling-system-modal-font-size) - 1px);
 }
 
+.journaling-system-review-wizard-context {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin-bottom: 14px;
+  padding: 8px 10px;
+}
+
+.journaling-system-review-wizard-summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.journaling-system-review-wizard-context-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.journaling-system-review-wizard-day {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 8px;
+}
+
+.journaling-system-review-wizard-day:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.journaling-system-review-wizard-day-title {
+  font-weight: 600;
+}
+
+.journaling-system-review-wizard-day-meta {
+  color: var(--text-muted);
+  font-size: calc(var(--journaling-system-modal-font-size) - 2px);
+  margin-top: 2px;
+}
+
+.journaling-system-review-wizard-day-short {
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
 .journaling-system-checkbox-row {
   align-items: center;
   display: flex;
