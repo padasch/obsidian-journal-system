@@ -38,6 +38,21 @@
   margin: 0 0 8px;
 }
 
+.journaling-system-system-note-body h4 {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  margin: 12px 0 6px;
+}
+
+.journaling-system-system-note-body ul {
+  margin: 0 0 8px 20px;
+  padding: 0;
+}
+
+.journaling-system-system-note-body li {
+  margin-bottom: 4px;
+}
+
 .journaling-system-section-note {
   margin-bottom: 10px;
   color: var(--text-muted);
@@ -48,6 +63,12 @@
   color: var(--text-normal);
   font-size: var(--font-ui-medium);
   font-weight: 600;
+}
+
+.journaling-system-setting-description {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: 2px;
 }
 
 .journaling-system-folder-preview {
@@ -131,6 +152,13 @@
   display: inline-flex;
   gap: 4px;
   white-space: nowrap;
+}
+
+.journaling-system-property-header {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 
 .journaling-system-property-input,

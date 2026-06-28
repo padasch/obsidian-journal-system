@@ -37,7 +37,8 @@ small, queryable index for Bases.
 
 The settings tab is organized into:
 
-- Basic settings for shared UI and review-workspace headings.
+- Basic settings for shared UI, the review note folder, global review content
+  switches, and review-workspace headings.
 - Property settings shared across all notes, including automatic properties,
   daily modal properties, and review properties such as `journalHighlights`,
   `journalDifficulties`, `journalImprovements`, `journalLife`, `journalWork`, and
@@ -46,6 +47,31 @@ The settings tab is organized into:
   columns, per-column Base widths, display names, and row height.
 - Separate Daily, Weekly, Monthly, and Annual settings sections for prompts,
   note formats, checklist prompts, and per-level long-entry embed behavior.
+
+The settings page also includes a foldable overview explaining the intended
+workflow and how the settings sections relate to each other.
+
+### Settings guide
+
+- Basic settings affect shared generated review structure. Use them to set the
+  review folder, the heading names used in generated notes, whether review
+  checklists are created, and whether long daily journal entries can be embedded
+  in reviews.
+- Automatic properties are maintained by the plugin and are mainly for filtering
+  and linking notes across time. They provide stable keys for daily, weekly,
+  monthly, and annual Bases.
+- Daily properties define the prompt fields. These should stay lightweight, since
+  daily notes are meant to capture raw signal quickly.
+- Review properties define the condensation fields. These are where highlights,
+  difficulties, improvements, life/work reflections, and themes emerge from daily
+  writing.
+- Bases settings control generated Obsidian Base blocks. Select which properties
+  should be visible and optionally set column widths for fields that need more
+  room.
+- Daily settings control prompt schedule and daily note creation. Weekly,
+  monthly, and annual settings control the review prompt schedule, review note
+  name format, checklist prompts, and whether that level embeds daily long
+  entries.
 
 Folder fields use Obsidian's native fuzzy selection modal for quick selection.
 Folder fields accept date tokens in braces, for example `journal/{YYYY}`, and show

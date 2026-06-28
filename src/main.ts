@@ -1761,15 +1761,34 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     body.createEl("p", {
       text: "Themes are not meant as daily topics. Treat them as short recurring patterns, for example sleep/recovery, context switching, creative momentum, or relationships. A small set of clear labels is more useful than tagging everything.",
     });
+
+    body.createEl("h4", { text: "Settings map" });
+    const list = body.createEl("ul");
+    list.createEl("li", {
+      text: "Basic settings control shared headings, the review folder, and journal modal appearance.",
+    });
+    list.createEl("li", {
+      text: "Property settings define the YAML property names and the fields shown in daily and review notes.",
+    });
+    list.createEl("li", {
+      text: "Bases settings control which source-note columns appear when review notes embed Obsidian Bases.",
+    });
+    list.createEl("li", {
+      text: "Daily, Weekly, Monthly, and Annual settings control each note type's prompt schedule, note naming, and level-specific review behavior.",
+    });
   }
 
   private displayBasicSettings(containerEl: HTMLElement): void {
     const section = createSettingsSection(containerEl, "Basic settings");
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Shared defaults for the journal modal and generated review-note workspace. Schedules and note naming are configured in the level-specific sections below.",
+    });
 
     const modalFontSize = normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx);
     const fontSizeSetting = new Setting(section)
       .setName("Journal modal font size")
-      .setDesc("Desktop journaling prompt text size.");
+      .setDesc("Desktop-only text size for the daily journal prompt. Mobile keeps the compact native layout.");
     fontSizeSetting.addSlider((slider) => {
       const formattedSlider = slider as typeof slider & {
         setDisplayFormat?: (format: (value: number) => string) => typeof slider;
@@ -1788,6 +1807,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addFolderSetting(
       section,
       "Review folder",
+      "Where weekly, monthly, and annual review notes are created. Date tokens such as {YYYY} are supported.",
       this.plugin.settings.reviews.folder,
       async (value) => {
         this.plugin.settings.reviews.folder = value;
@@ -1795,11 +1815,22 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       }
     );
 
-    this.addToggleSetting(section, "Review checklist", "includeReviewChecklist");
-    this.addToggleSetting(section, "Long-entry embeds", "includeLongEntryEmbeds");
+    this.addToggleSetting(
+      section,
+      "Review checklist",
+      "Add checklist prompts to generated review notes. Property fill-in checklist items are generated automatically.",
+      "includeReviewChecklist"
+    );
+    this.addToggleSetting(
+      section,
+      "Long-entry embeds",
+      "Global switch for embedding matching daily ## Journal sections in review notes. Each review level also has its own switch.",
+      "includeLongEntryEmbeds"
+    );
     this.addTextSetting(
       section,
       "Checklist heading",
+      "Heading used above generated checklist prompts in review notes.",
       this.plugin.settings.reviews.checklistHeading,
       async (value) => {
         this.plugin.settings.reviews.checklistHeading =
@@ -1810,6 +1841,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addTextSetting(
       section,
       "Source notes heading",
+      "Heading used above generated Bases that show source daily or review notes.",
       this.plugin.settings.reviews.sourceNotesHeading,
       async (value) => {
         this.plugin.settings.reviews.sourceNotesHeading =
@@ -1820,6 +1852,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addTextSetting(
       section,
       "Long entries heading",
+      "Heading used above embedded daily long journal entries in review notes.",
       this.plugin.settings.reviews.longEntriesHeading,
       async (value) => {
         this.plugin.settings.reviews.longEntriesHeading =
@@ -1830,6 +1863,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addTextSetting(
       section,
       "Reflection heading",
+      "Heading for your own written review reflection. Generated refreshes preserve this section.",
       this.plugin.settings.reviews.reflectionHeading,
       async (value) => {
         this.plugin.settings.reviews.reflectionHeading =
@@ -1841,11 +1875,21 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
   private displayBaseSettings(containerEl: HTMLElement): void {
     const section = createSettingsSection(containerEl, "Bases settings shared across all notes");
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Bases are generated into review notes so you can browse the underlying daily or review notes without copying their full content.",
+    });
 
-    this.addToggleSetting(section, "Inline Bases", "includeInlineBases");
+    this.addToggleSetting(
+      section,
+      "Inline Bases",
+      "Add Obsidian Base blocks to generated review notes. Turn this off if you only want headings, checklists, reflection, and long-entry embeds.",
+      "includeInlineBases"
+    );
     this.addToggleSetting(
       section,
       "Daily Base in monthly/annual",
+      "Also include a daily-note Base in monthly and annual reviews, in addition to the hierarchical weekly/monthly review Base.",
       "includeDailyBaseOnHigherReviews"
     );
 
@@ -1865,7 +1909,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     section.createEl("h3", { text: "Daily source Base columns" });
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "Used by weekly reviews and by the optional daily Base in monthly or annual reviews.",
+      text: "Used by weekly reviews and by the optional daily Base in monthly or annual reviews. Select Show to include a property, and set a width in pixels when a column needs more room.",
     });
     this.renderBasePropertyTable(
       section,
@@ -1876,7 +1920,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     section.createEl("h3", { text: "Review source Base columns" });
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "Used when monthly reviews show weekly reviews and annual reviews show monthly reviews.",
+      text: "Used when monthly reviews show weekly reviews and annual reviews show monthly reviews. These columns should focus on condensed review properties, not raw daily detail.",
     });
     this.renderBasePropertyTable(
       section,
@@ -1887,9 +1931,14 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
   private displayDailySettings(containerEl: HTMLElement): void {
     const section = createSettingsSection(containerEl, "Daily settings");
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Controls when the daily prompt appears and where daily notes are created. The fields inside the prompt are configured in Property settings.",
+    });
 
     new Setting(section)
       .setName("Enable prompts")
+      .setDesc("Turn scheduled daily prompts on or off. The command remains available even when scheduled prompts are disabled.")
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.dailyPrompts.enabled).onChange(async (value) => {
           this.plugin.settings.dailyPrompts.enabled = value;
@@ -1899,6 +1948,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Times")
+      .setDesc("Prompt times in 24-hour format, separated by commas. Example: 09:00, 20:00.")
       .addText((text) => {
         text
           .setPlaceholder("09:00, 20:00")
@@ -1910,7 +1960,12 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       });
 
     const weekdayRow = section.createDiv({ cls: "journaling-system-weekday-row" });
-    weekdayRow.createDiv({ text: "Weekdays", cls: "journaling-system-setting-label" });
+    const weekdayLabel = weekdayRow.createDiv();
+    weekdayLabel.createDiv({ text: "Weekdays", cls: "journaling-system-setting-label" });
+    weekdayLabel.createDiv({
+      text: "Only selected weekdays can trigger scheduled daily prompts.",
+      cls: "journaling-system-setting-description",
+    });
     const weekdayButtons = weekdayRow.createDiv({ cls: "journaling-system-weekday-grid" });
 
     for (const weekday of WEEKDAYS) {
@@ -1940,6 +1995,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Snooze minutes")
+      .setDesc("How long the prompt waits before asking again when snoozed.")
       .addText((text) => {
         text.inputEl.type = "number";
         text
@@ -1956,6 +2012,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Catch up missed prompts")
+      .setDesc("Show a missed prompt after Obsidian opens if a scheduled prompt time passed while the app was closed.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.dailyPrompts.catchUpMissedPrompts)
@@ -1968,6 +2025,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addFolderSetting(
       section,
       "Folder",
+      "Daily note folder. Date tokens such as journal/{YYYY} create year-based folders.",
       this.plugin.settings.dailyNote.folder,
       async (value) => {
         this.plugin.settings.dailyNote.folder = value;
@@ -1977,6 +2035,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addTextSetting(
       section,
       "Date format",
+      "Moment-style note name format used for daily note files, for example YYYY-MM-DD dddd.",
       this.plugin.settings.dailyNote.dateFormat,
       async (value) => {
         this.plugin.settings.dailyNote.dateFormat = value || DEFAULT_SETTINGS.dailyNote.dateFormat;
@@ -1986,6 +2045,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addTextSetting(
       section,
       "Long-entry heading",
+      "Heading where long journal writing lives inside the daily note. Review embeds target this heading.",
       this.plugin.settings.dailyNote.longEntryHeading,
       async (value) => {
         this.plugin.settings.dailyNote.longEntryHeading =
@@ -1996,6 +2056,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addTextSetting(
       section,
       "Capture heading",
+      "Heading for short daily captures written into the note body, separate from frontmatter properties.",
       this.plugin.settings.dailyNote.shortEntrySectionHeading,
       async (value) => {
         this.plugin.settings.dailyNote.shortEntrySectionHeading =
@@ -2006,6 +2067,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Create note if missing")
+      .setDesc("Create the daily note automatically when the prompt or long-entry command is used.")
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.dailyNote.createIfMissing).onChange(async (value) => {
           this.plugin.settings.dailyNote.createIfMissing = value;
@@ -2020,10 +2082,15 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     level: ReviewLevel
   ): void {
     const section = createSettingsSection(containerEl, `${label} settings`);
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: this.getReviewLevelDescription(level),
+    });
     const review = this.plugin.settings.reviews[level];
 
     new Setting(section)
       .setName(`Enable ${label.toLowerCase()} review`)
+      .setDesc(`Turn scheduled ${label.toLowerCase()} review prompts on or off. The command remains available either way.`)
       .addToggle((toggle) => {
         toggle.setValue(review.enabled).onChange(async (value) => {
           review.enabled = value;
@@ -2034,6 +2101,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     if (level === "weekly") {
       new Setting(section)
         .setName("Prompt weekday")
+        .setDesc("Weekday when the weekly review prompt should appear.")
         .addDropdown((dropdown) => {
           dropdown
             .addOptions(WEEKDAY_LABELS)
@@ -2048,6 +2116,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     if (level === "monthly") {
       new Setting(section)
         .setName("Prompt day of month")
+        .setDesc("Calendar day when the monthly review prompt should appear, from 1 to 31.")
         .addText((text) => {
           text.inputEl.type = "number";
           text.setValue(String(this.plugin.settings.reviews.monthly.promptDayOfMonth));
@@ -2065,6 +2134,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     if (level === "annual") {
       new Setting(section)
         .setName("Prompt month-day")
+        .setDesc("Month and day for the annual review prompt, written as MM-DD.")
         .addText((text) => {
           text.setPlaceholder("01-01").setValue(this.plugin.settings.reviews.annual.promptMonthDay);
           text.onChange(async (value) => {
@@ -2076,6 +2146,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Prompt time")
+      .setDesc(`Time of day for the ${label.toLowerCase()} review prompt.`)
       .addText((text) => {
         text.inputEl.type = "time";
         text.setValue(review.promptTime).onChange(async (value) => {
@@ -2084,10 +2155,16 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         });
       });
 
-    this.addTextSetting(section, "Note format", review.noteNameFormat, async (value) => {
-      review.noteNameFormat = value || DEFAULT_SETTINGS.reviews[level].noteNameFormat;
-      await this.plugin.saveSettings();
-    });
+    this.addTextSetting(
+      section,
+      "Note format",
+      "Moment-style note name format for this review level.",
+      review.noteNameFormat,
+      async (value) => {
+        review.noteNameFormat = value || DEFAULT_SETTINGS.reviews[level].noteNameFormat;
+        await this.plugin.saveSettings();
+      }
+    );
 
     new Setting(section)
       .setName("Long-entry embeds")
@@ -2104,21 +2181,42 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.renderChecklistSetting(section, label, level);
   }
 
+  private getReviewLevelDescription(level: ReviewLevel): string {
+    if (level === "weekly") {
+      return "Weekly reviews are the first interpretation layer. They use daily notes as source material and are the best place to name highlights, difficulties, improvements, and life/work reflections.";
+    }
+
+    if (level === "monthly") {
+      return "Monthly reviews synthesize patterns from weekly reviews. They can also include a daily-note Base when you want to browse raw entries while reflecting.";
+    }
+
+    return "Annual reviews synthesize direction from monthly reviews. Keep annual properties high-level so the year view stays readable.";
+  }
+
   private displayPropertySettings(containerEl: HTMLElement): void {
     const section = createSettingsSection(containerEl, "Property settings shared across all notes");
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Property names are YAML frontmatter keys written into notes. Labels only change how fields appear in the prompt/settings UI.",
+    });
 
     section.createEl("h3", { text: "Automatic properties" });
-    this.addTextSetting(section, "Date", this.plugin.settings.automaticProperties.date, async (value) => {
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Automatic properties are maintained by the plugin so Bases can reliably filter by date, weekday, note type, week, month, and year.",
+    });
+    this.addTextSetting(section, "Date", "Calendar date of the journal note.", this.plugin.settings.automaticProperties.date, async (value) => {
       this.plugin.settings.automaticProperties.date = value || DEFAULT_SETTINGS.automaticProperties.date;
       await this.plugin.saveSettings();
     });
-    this.addTextSetting(section, "Time", this.plugin.settings.automaticProperties.time, async (value) => {
+    this.addTextSetting(section, "Time", "Time when the daily journal prompt was saved.", this.plugin.settings.automaticProperties.time, async (value) => {
       this.plugin.settings.automaticProperties.time = value || DEFAULT_SETTINGS.automaticProperties.time;
       await this.plugin.saveSettings();
     });
     this.addTextSetting(
       section,
       "Weekday",
+      "Weekday label derived from the note date.",
       this.plugin.settings.automaticProperties.weekday,
       async (value) => {
         this.plugin.settings.automaticProperties.weekday =
@@ -2126,19 +2224,19 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       }
     );
-    this.addTextSetting(section, "Type", this.plugin.settings.automaticProperties.type, async (value) => {
+    this.addTextSetting(section, "Type", "Note type marker such as daily, weekly, monthly, or annual.", this.plugin.settings.automaticProperties.type, async (value) => {
       this.plugin.settings.automaticProperties.type = value || DEFAULT_SETTINGS.automaticProperties.type;
       await this.plugin.saveSettings();
     });
-    this.addTextSetting(section, "ISO week", this.plugin.settings.automaticProperties.week, async (value) => {
+    this.addTextSetting(section, "ISO week", "ISO week key used to connect daily notes to weekly reviews.", this.plugin.settings.automaticProperties.week, async (value) => {
       this.plugin.settings.automaticProperties.week = value || DEFAULT_SETTINGS.automaticProperties.week;
       await this.plugin.saveSettings();
     });
-    this.addTextSetting(section, "Month", this.plugin.settings.automaticProperties.month, async (value) => {
+    this.addTextSetting(section, "Month", "Month key used to connect notes to monthly reviews.", this.plugin.settings.automaticProperties.month, async (value) => {
       this.plugin.settings.automaticProperties.month = value || DEFAULT_SETTINGS.automaticProperties.month;
       await this.plugin.saveSettings();
     });
-    this.addTextSetting(section, "Year", this.plugin.settings.automaticProperties.year, async (value) => {
+    this.addTextSetting(section, "Year", "Year key used to connect notes to annual reviews.", this.plugin.settings.automaticProperties.year, async (value) => {
       this.plugin.settings.automaticProperties.year = value || DEFAULT_SETTINGS.automaticProperties.year;
       await this.plugin.saveSettings();
     });
@@ -2146,8 +2244,9 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     section.createEl("h3", { text: "Daily properties" });
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "These definitions control the daily journal modal. Keep this light: daily notes are raw signal.",
+      text: "These definitions control the daily journal modal. Keep daily fields light: text captures nuance, number fields work for simple scales, and multiselect fields should only be used when you want reusable labels.",
     });
+    this.renderPropertyRowHeader(section, false);
 
     const list = section.createDiv({ cls: "journaling-system-property-list" });
     for (const property of this.plugin.settings.properties) {
@@ -2176,8 +2275,9 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     section.createEl("h3", { text: "Review properties" });
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "These properties are added to review notes and become the condensation layer above daily writing.",
+      text: "These properties are added to review notes and become the condensation layer above daily writing. Themes are review-level multiselect labels for recurring patterns, while reflection text carries the explanation.",
     });
+    this.renderPropertyRowHeader(section, true);
     const reviewPropertyList = section.createDiv({
       cls: "journaling-system-review-property-list",
     });
@@ -2202,6 +2302,22 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           this.display();
         });
     });
+  }
+
+  private renderPropertyRowHeader(containerEl: HTMLElement, isReview: boolean): void {
+    const row = containerEl.createDiv({
+      cls: isReview
+        ? "journaling-system-review-property-row journaling-system-property-header"
+        : "journaling-system-property-row journaling-system-property-header",
+    });
+
+    const labels = isReview
+      ? ["On", "Label", "Property", "Type", "Levels", ""]
+      : ["On", "Label", "Property", "Placeholder", "Type", "Min", "Max", ""];
+
+    for (const label of labels) {
+      row.createDiv({ text: label });
+    }
   }
 
   private renderPropertyRow(containerEl: HTMLElement, property: JournalPropertyDefinition): void {
@@ -2477,14 +2593,33 @@ class JournalingSystemSettingTab extends PluginSettingTab {
   private addToggleSetting(
     containerEl: HTMLElement,
     name: string,
-    key:
+    descriptionOrKey:
+      | "includeManagedRollupBlock"
+      | "includeInlineBases"
+      | "includeLongEntryEmbeds"
+      | "includeReviewChecklist"
+      | "includeDailyBaseOnHigherReviews"
+      | string,
+    maybeKey?:
       | "includeManagedRollupBlock"
       | "includeInlineBases"
       | "includeLongEntryEmbeds"
       | "includeReviewChecklist"
       | "includeDailyBaseOnHigherReviews"
   ): void {
-    new Setting(containerEl).setName(name).addToggle((toggle) => {
+    const description = maybeKey ? descriptionOrKey : undefined;
+    const key = maybeKey ?? (descriptionOrKey as
+      | "includeManagedRollupBlock"
+      | "includeInlineBases"
+      | "includeLongEntryEmbeds"
+      | "includeReviewChecklist"
+      | "includeDailyBaseOnHigherReviews");
+    const setting = new Setting(containerEl).setName(name);
+    if (description) {
+      setting.setDesc(description);
+    }
+
+    setting.addToggle((toggle) => {
       toggle.setValue(this.plugin.settings.reviews[key]).onChange(async (value) => {
         this.plugin.settings.reviews[key] = value;
         await this.plugin.saveSettings();
@@ -2495,25 +2630,50 @@ class JournalingSystemSettingTab extends PluginSettingTab {
   private addTextSetting(
     containerEl: HTMLElement,
     name: string,
-    value: string,
-    onChange: (value: string) => Promise<void>
+    descriptionOrValue: string,
+    valueOrOnChange: string | ((value: string) => Promise<void>),
+    maybeOnChange?: (value: string) => Promise<void>
   ): void {
-    new Setting(containerEl)
-      .setName(name)
-      .addText((text) => {
-        text.setValue(value).onChange(async (newValue) => {
-          await onChange(newValue.trim());
-        });
+    const description = typeof valueOrOnChange === "string" ? descriptionOrValue : undefined;
+    const value = typeof valueOrOnChange === "string" ? valueOrOnChange : descriptionOrValue;
+    const onChange = typeof valueOrOnChange === "string" ? maybeOnChange : valueOrOnChange;
+
+    if (!onChange) {
+      throw new Error(`Missing onChange handler for ${name}`);
+    }
+
+    const setting = new Setting(containerEl).setName(name);
+    if (description) {
+      setting.setDesc(description);
+    }
+
+    setting.addText((text) => {
+      text.setValue(value).onChange(async (newValue) => {
+        await onChange(newValue.trim());
       });
+    });
   }
 
   private addFolderSetting(
     containerEl: HTMLElement,
     name: string,
-    value: string,
-    onChange: (value: string) => Promise<void>
+    descriptionOrValue: string,
+    valueOrOnChange: string | ((value: string) => Promise<void>),
+    maybeOnChange?: (value: string) => Promise<void>
   ): void {
+    const description = typeof valueOrOnChange === "string" ? descriptionOrValue : undefined;
+    const value = typeof valueOrOnChange === "string" ? valueOrOnChange : descriptionOrValue;
+    const onChange = typeof valueOrOnChange === "string" ? maybeOnChange : valueOrOnChange;
+
+    if (!onChange) {
+      throw new Error(`Missing onChange handler for ${name}`);
+    }
+
     const setting = new Setting(containerEl).setName(name);
+    if (description) {
+      setting.setDesc(description);
+    }
+
     const previewEl = setting.settingEl.createDiv({
       cls: "journaling-system-folder-preview",
     });
