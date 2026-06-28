@@ -133,14 +133,6 @@
   visibility: hidden;
 }
 
-.journaling-system-review-level-row {
-  align-items: center;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(160px, 1fr) minmax(240px, 2fr);
-  padding: 8px 0;
-}
-
 .journaling-system-base-property-table {
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;

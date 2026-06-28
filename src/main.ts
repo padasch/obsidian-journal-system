@@ -1729,14 +1729,139 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     containerEl.addClass("journaling-system-settings");
 
     containerEl.createEl("h1", { text: "Journaling System" });
-    this.displayDailyPromptSettings(containerEl);
-    this.displayDailyNoteSettings(containerEl);
+    this.displayBasicSettings(containerEl);
     this.displayPropertySettings(containerEl);
-    this.displayReviewSettings(containerEl);
+    this.displayBaseSettings(containerEl);
+    this.displayDailySettings(containerEl);
+    this.displayReviewLevelSettings(containerEl, "Weekly", "weekly");
+    this.displayReviewLevelSettings(containerEl, "Monthly", "monthly");
+    this.displayReviewLevelSettings(containerEl, "Annual", "annual");
   }
 
-  private displayDailyPromptSettings(containerEl: HTMLElement): void {
-    const section = createSettingsSection(containerEl, "Daily prompts");
+  private displayBasicSettings(containerEl: HTMLElement): void {
+    const section = createSettingsSection(containerEl, "Basic settings");
+
+    const modalFontSize = normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx);
+    const fontSizeSetting = new Setting(section)
+      .setName("Journal modal font size")
+      .setDesc("Desktop journaling prompt text size.");
+    fontSizeSetting.addSlider((slider) => {
+      const formattedSlider = slider as typeof slider & {
+        setDisplayFormat?: (format: (value: number) => string) => typeof slider;
+      };
+      formattedSlider.setDisplayFormat?.((value) => `${value}px`);
+      slider
+        .setLimits(12, 20, 1)
+        .setValue(modalFontSize)
+        .onChange(async (value) => {
+          const normalized = normalizeModalFontSize(value);
+          this.plugin.settings.ui.modalFontSizePx = normalized;
+          await this.plugin.saveSettings();
+        });
+    });
+
+    this.addFolderSetting(
+      section,
+      "Review folder",
+      this.plugin.settings.reviews.folder,
+      async (value) => {
+        this.plugin.settings.reviews.folder = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addToggleSetting(section, "Review checklist", "includeReviewChecklist");
+    this.addToggleSetting(section, "Long-entry embeds", "includeLongEntryEmbeds");
+    this.addTextSetting(
+      section,
+      "Checklist heading",
+      this.plugin.settings.reviews.checklistHeading,
+      async (value) => {
+        this.plugin.settings.reviews.checklistHeading =
+          value || DEFAULT_SETTINGS.reviews.checklistHeading;
+        await this.plugin.saveSettings();
+      }
+    );
+    this.addTextSetting(
+      section,
+      "Source notes heading",
+      this.plugin.settings.reviews.sourceNotesHeading,
+      async (value) => {
+        this.plugin.settings.reviews.sourceNotesHeading =
+          value || DEFAULT_SETTINGS.reviews.sourceNotesHeading;
+        await this.plugin.saveSettings();
+      }
+    );
+    this.addTextSetting(
+      section,
+      "Long entries heading",
+      this.plugin.settings.reviews.longEntriesHeading,
+      async (value) => {
+        this.plugin.settings.reviews.longEntriesHeading =
+          value || DEFAULT_SETTINGS.reviews.longEntriesHeading;
+        await this.plugin.saveSettings();
+      }
+    );
+    this.addTextSetting(
+      section,
+      "Reflection heading",
+      this.plugin.settings.reviews.reflectionHeading,
+      async (value) => {
+        this.plugin.settings.reviews.reflectionHeading =
+          value || DEFAULT_SETTINGS.reviews.reflectionHeading;
+        await this.plugin.saveSettings();
+      }
+    );
+  }
+
+  private displayBaseSettings(containerEl: HTMLElement): void {
+    const section = createSettingsSection(containerEl, "Bases settings shared across all notes");
+
+    this.addToggleSetting(section, "Inline Bases", "includeInlineBases");
+    this.addToggleSetting(
+      section,
+      "Daily Base in monthly/annual",
+      "includeDailyBaseOnHigherReviews"
+    );
+
+    new Setting(section)
+      .setName("Base row height")
+      .setDesc("Controls row height for generated review Bases.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOptions(BASE_ROW_HEIGHT_LABELS)
+          .setValue(normalizeBaseRowHeight(this.plugin.settings.reviews.baseRowHeight))
+          .onChange(async (value) => {
+            this.plugin.settings.reviews.baseRowHeight = normalizeBaseRowHeight(value);
+            await this.plugin.saveSettings();
+          });
+      });
+
+    section.createEl("h3", { text: "Daily source Base columns" });
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Used by weekly reviews and by the optional daily Base in monthly or annual reviews.",
+    });
+    this.renderBasePropertyTable(
+      section,
+      "baseProperties",
+      this.plugin.getAvailableBaseProperties("daily")
+    );
+
+    section.createEl("h3", { text: "Review source Base columns" });
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Used when monthly reviews show weekly reviews and annual reviews show monthly reviews.",
+    });
+    this.renderBasePropertyTable(
+      section,
+      "reviewBaseProperties",
+      this.plugin.getAvailableBaseProperties("review")
+    );
+  }
+
+  private displayDailySettings(containerEl: HTMLElement): void {
+    const section = createSettingsSection(containerEl, "Daily settings");
 
     new Setting(section)
       .setName("Enable prompts")
@@ -1815,29 +1940,6 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           });
       });
 
-    const modalFontSize = normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx);
-    const fontSizeSetting = new Setting(section)
-      .setName("Journal modal font size")
-      .setDesc("Desktop journaling prompt text size.");
-    fontSizeSetting.addSlider((slider) => {
-      const formattedSlider = slider as typeof slider & {
-        setDisplayFormat?: (format: (value: number) => string) => typeof slider;
-      };
-      formattedSlider.setDisplayFormat?.((value) => `${value}px`);
-      slider
-        .setLimits(12, 20, 1)
-        .setValue(modalFontSize)
-        .onChange(async (value) => {
-          const normalized = normalizeModalFontSize(value);
-          this.plugin.settings.ui.modalFontSizePx = normalized;
-          await this.plugin.saveSettings();
-        });
-    });
-  }
-
-  private displayDailyNoteSettings(containerEl: HTMLElement): void {
-    const section = createSettingsSection(containerEl, "Daily note");
-
     this.addFolderSetting(
       section,
       "Folder",
@@ -1887,36 +1989,98 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       });
   }
 
-  private displayPropertySettings(containerEl: HTMLElement): void {
-    const section = createSettingsSection(containerEl, "Daily properties");
-    section.createDiv({
-      cls: "journaling-system-section-note",
-      text: "These definitions control the daily journal modal. Keep this light: daily notes are raw signal.",
-    });
+  private displayReviewLevelSettings(
+    containerEl: HTMLElement,
+    label: string,
+    level: ReviewLevel
+  ): void {
+    const section = createSettingsSection(containerEl, `${label} settings`);
+    const review = this.plugin.settings.reviews[level];
 
-    const list = section.createDiv({ cls: "journaling-system-property-list" });
-    for (const property of this.plugin.settings.properties) {
-      this.renderPropertyRow(list, property);
+    new Setting(section)
+      .setName(`Enable ${label.toLowerCase()} review`)
+      .addToggle((toggle) => {
+        toggle.setValue(review.enabled).onChange(async (value) => {
+          review.enabled = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    if (level === "weekly") {
+      new Setting(section)
+        .setName("Prompt weekday")
+        .addDropdown((dropdown) => {
+          dropdown
+            .addOptions(WEEKDAY_LABELS)
+            .setValue(this.plugin.settings.reviews.weekly.promptWeekday)
+            .onChange(async (value) => {
+              this.plugin.settings.reviews.weekly.promptWeekday = value as Weekday;
+              await this.plugin.saveSettings();
+            });
+        });
     }
 
-    new Setting(section).addButton((button) => {
-      button
-        .setButtonText("Add property")
-        .setCta()
-        .onClick(async () => {
-          this.plugin.settings.properties.push({
-            id: `custom-${Date.now()}`,
-            enabled: true,
-            label: "New property",
-            property: "journalCustom",
-            placeholder: "",
-            type: "text",
-            role: "custom",
+    if (level === "monthly") {
+      new Setting(section)
+        .setName("Prompt day of month")
+        .addText((text) => {
+          text.inputEl.type = "number";
+          text.setValue(String(this.plugin.settings.reviews.monthly.promptDayOfMonth));
+          text.onChange(async (value) => {
+            this.plugin.settings.reviews.monthly.promptDayOfMonth = clamp(
+              parseInteger(value, 1),
+              1,
+              31
+            );
+            await this.plugin.saveSettings();
           });
-          await this.plugin.saveSettings();
-          this.display();
         });
+    }
+
+    if (level === "annual") {
+      new Setting(section)
+        .setName("Prompt month-day")
+        .addText((text) => {
+          text.setPlaceholder("01-01").setValue(this.plugin.settings.reviews.annual.promptMonthDay);
+          text.onChange(async (value) => {
+            this.plugin.settings.reviews.annual.promptMonthDay = value.trim() || "01-01";
+            await this.plugin.saveSettings();
+          });
+        });
+    }
+
+    new Setting(section)
+      .setName("Prompt time")
+      .addText((text) => {
+        text.inputEl.type = "time";
+        text.setValue(review.promptTime).onChange(async (value) => {
+          review.promptTime = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    this.addTextSetting(section, "Note format", review.noteNameFormat, async (value) => {
+      review.noteNameFormat = value || DEFAULT_SETTINGS.reviews[level].noteNameFormat;
+      await this.plugin.saveSettings();
     });
+
+    new Setting(section)
+      .setName("Long-entry embeds")
+      .setDesc(`Embed matching daily long journal entries in ${label.toLowerCase()} reviews.`)
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.reviews.longEntryEmbedLevels[level] === true)
+          .onChange(async (value) => {
+            this.plugin.settings.reviews.longEntryEmbedLevels[level] = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    this.renderChecklistSetting(section, label, level);
+  }
+
+  private displayPropertySettings(containerEl: HTMLElement): void {
+    const section = createSettingsSection(containerEl, "Property settings shared across all notes");
 
     section.createEl("h3", { text: "Automatic properties" });
     this.addTextSetting(section, "Date", this.plugin.settings.automaticProperties.date, async (value) => {
@@ -1952,6 +2116,66 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addTextSetting(section, "Year", this.plugin.settings.automaticProperties.year, async (value) => {
       this.plugin.settings.automaticProperties.year = value || DEFAULT_SETTINGS.automaticProperties.year;
       await this.plugin.saveSettings();
+    });
+
+    section.createEl("h3", { text: "Daily properties" });
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "These definitions control the daily journal modal. Keep this light: daily notes are raw signal.",
+    });
+
+    const list = section.createDiv({ cls: "journaling-system-property-list" });
+    for (const property of this.plugin.settings.properties) {
+      this.renderPropertyRow(list, property);
+    }
+
+    new Setting(section).addButton((button) => {
+      button
+        .setButtonText("Add property")
+        .setCta()
+        .onClick(async () => {
+          this.plugin.settings.properties.push({
+            id: `custom-${Date.now()}`,
+            enabled: true,
+            label: "New property",
+            property: "journalCustom",
+            placeholder: "",
+            type: "text",
+            role: "custom",
+          });
+          await this.plugin.saveSettings();
+          this.display();
+        });
+    });
+
+    section.createEl("h3", { text: "Review properties" });
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "These properties are added to review notes and become the condensation layer above daily writing.",
+    });
+    const reviewPropertyList = section.createDiv({
+      cls: "journaling-system-review-property-list",
+    });
+    for (const property of this.plugin.settings.reviews.reviewProperties) {
+      this.renderReviewPropertyRow(reviewPropertyList, property);
+    }
+    new Setting(section).addButton((button) => {
+      button
+        .setButtonText("Add review property")
+        .setCta()
+        .onClick(async () => {
+          this.plugin.settings.reviews.reviewProperties.push({
+            id: `review-custom-${Date.now()}`,
+            enabled: true,
+            label: "New review property",
+            property: "journalReviewCustom",
+            placeholder: "",
+            type: "text",
+            levels: ["weekly", "monthly", "annual"],
+          });
+          await this.plugin.saveSettings();
+          this.display();
+        });
     });
   }
 
@@ -2052,189 +2276,24 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     });
   }
 
-  private displayReviewSettings(containerEl: HTMLElement): void {
-    const section = createSettingsSection(containerEl, "Reviews");
-
-    this.addReviewRow(section, "Weekly", "weekly");
-    this.addReviewRow(section, "Monthly", "monthly");
-    this.addReviewRow(section, "Annual", "annual");
-
-    this.addFolderSetting(
-      section,
-      "Review folder",
-      this.plugin.settings.reviews.folder,
-      async (value) => {
-        this.plugin.settings.reviews.folder = value;
-        await this.plugin.saveSettings();
-      }
-    );
-
-    section.createEl("h3", { text: "Review workspace" });
-    this.addToggleSetting(section, "Review checklist", "includeReviewChecklist");
-    this.addTextSetting(
-      section,
-      "Checklist heading",
-      this.plugin.settings.reviews.checklistHeading,
-      async (value) => {
-        this.plugin.settings.reviews.checklistHeading =
-          value || DEFAULT_SETTINGS.reviews.checklistHeading;
-        await this.plugin.saveSettings();
-      }
-    );
-    this.renderChecklistSettings(section);
-
-    this.addToggleSetting(section, "Inline Bases", "includeInlineBases");
-    this.addToggleSetting(section, "Long-entry embeds", "includeLongEntryEmbeds");
-    this.renderLongEntryLevelSettings(section);
-    this.addToggleSetting(
-      section,
-      "Daily Base in monthly/annual",
-      "includeDailyBaseOnHigherReviews"
-    );
-
-    section.createEl("h3", { text: "Review properties" });
-    section.createDiv({
-      cls: "journaling-system-section-note",
-      text: "These properties are added to review notes and become the condensation layer above daily writing.",
-    });
-    const reviewPropertyList = section.createDiv({
-      cls: "journaling-system-review-property-list",
-    });
-    for (const property of this.plugin.settings.reviews.reviewProperties) {
-      this.renderReviewPropertyRow(reviewPropertyList, property);
-    }
-    new Setting(section).addButton((button) => {
-      button
-        .setButtonText("Add review property")
-        .setCta()
-        .onClick(async () => {
-          this.plugin.settings.reviews.reviewProperties.push({
-            id: `review-custom-${Date.now()}`,
-            enabled: true,
-            label: "New review property",
-            property: "journalReviewCustom",
-            placeholder: "",
-            type: "text",
-            levels: ["weekly", "monthly", "annual"],
-          });
-          await this.plugin.saveSettings();
-          this.display();
-        });
-    });
-
-    section.createEl("h3", { text: "Daily source Base columns" });
-    section.createDiv({
-      cls: "journaling-system-section-note",
-      text: "Used by weekly reviews and by the optional daily Base in monthly or annual reviews.",
-    });
-    this.renderBasePropertyTable(
-      section,
-      "baseProperties",
-      this.plugin.getAvailableBaseProperties("daily")
-    );
-
-    section.createEl("h3", { text: "Review source Base columns" });
-    section.createDiv({
-      cls: "journaling-system-section-note",
-      text: "Used when monthly reviews show weekly reviews and annual reviews show monthly reviews.",
-    });
-    this.renderBasePropertyTable(
-      section,
-      "reviewBaseProperties",
-      this.plugin.getAvailableBaseProperties("review")
-    );
-
-    new Setting(section)
-      .setName("Base row height")
-      .setDesc("Controls row height for generated review Bases.")
-      .addDropdown((dropdown) => {
-        dropdown
-          .addOptions(BASE_ROW_HEIGHT_LABELS)
-          .setValue(normalizeBaseRowHeight(this.plugin.settings.reviews.baseRowHeight))
+  private renderChecklistSetting(
+    containerEl: HTMLElement,
+    label: string,
+    level: ReviewLevel
+  ): void {
+    new Setting(containerEl)
+      .setName(`${label} checklist prompts`)
+      .setDesc("One process item per line. Property fill-in items are added automatically.")
+      .addTextArea((textarea) => {
+        textarea
+          .setValue(this.plugin.settings.reviews.checklistItems[level].join("\n"))
           .onChange(async (value) => {
-            this.plugin.settings.reviews.baseRowHeight = normalizeBaseRowHeight(value);
+            this.plugin.settings.reviews.checklistItems[level] =
+              normalizeChecklistItems(value);
             await this.plugin.saveSettings();
           });
+        textarea.inputEl.addClass("journaling-system-checklist-textarea");
       });
-
-    this.addTextSetting(
-      section,
-      "Reflection heading",
-      this.plugin.settings.reviews.reflectionHeading,
-      async (value) => {
-        this.plugin.settings.reviews.reflectionHeading =
-          value || DEFAULT_SETTINGS.reviews.reflectionHeading;
-        await this.plugin.saveSettings();
-      }
-    );
-    this.addTextSetting(section, "Rollup heading", this.plugin.settings.reviews.rollupHeading, async (value) => {
-      this.plugin.settings.reviews.rollupHeading = value || DEFAULT_SETTINGS.reviews.rollupHeading;
-      await this.plugin.saveSettings();
-    });
-    this.addTextSetting(
-      section,
-      "Source notes heading",
-      this.plugin.settings.reviews.sourceNotesHeading,
-      async (value) => {
-        this.plugin.settings.reviews.sourceNotesHeading =
-          value || DEFAULT_SETTINGS.reviews.sourceNotesHeading;
-        await this.plugin.saveSettings();
-      }
-    );
-    this.addTextSetting(
-      section,
-      "Long entries heading",
-      this.plugin.settings.reviews.longEntriesHeading,
-      async (value) => {
-        this.plugin.settings.reviews.longEntriesHeading =
-          value || DEFAULT_SETTINGS.reviews.longEntriesHeading;
-        await this.plugin.saveSettings();
-      }
-    );
-  }
-
-  private renderChecklistSettings(containerEl: HTMLElement): void {
-    const labels: Record<ReviewLevel, string> = {
-      weekly: "Weekly checklist prompts",
-      monthly: "Monthly checklist prompts",
-      annual: "Annual checklist prompts",
-    };
-
-    for (const level of REVIEW_LEVELS) {
-      new Setting(containerEl)
-        .setName(labels[level])
-        .setDesc("One process item per line. Property fill-in items are added automatically.")
-        .addTextArea((textarea) => {
-          textarea
-            .setValue(this.plugin.settings.reviews.checklistItems[level].join("\n"))
-            .onChange(async (value) => {
-              this.plugin.settings.reviews.checklistItems[level] =
-                normalizeChecklistItems(value);
-              await this.plugin.saveSettings();
-            });
-          textarea.inputEl.addClass("journaling-system-checklist-textarea");
-        });
-    }
-  }
-
-  private renderLongEntryLevelSettings(containerEl: HTMLElement): void {
-    const row = containerEl.createDiv({ cls: "journaling-system-review-level-row" });
-    row.createDiv({ cls: "journaling-system-setting-label", text: "Long-entry levels" });
-    const levels = row.createDiv({ cls: "journaling-system-weekday-grid" });
-
-    for (const level of REVIEW_LEVELS) {
-      const active = this.plugin.settings.reviews.longEntryEmbedLevels[level] === true;
-      const button = levels.createEl("button", {
-        text: capitalize(level),
-        cls: active ? "journaling-system-weekday is-active" : "journaling-system-weekday",
-      });
-      button.type = "button";
-      button.addEventListener("click", async () => {
-        this.plugin.settings.reviews.longEntryEmbedLevels[level] = !active;
-        await this.plugin.saveSettings();
-        this.display();
-      });
-    }
   }
 
   private renderReviewPropertyRow(
@@ -2388,68 +2447,6 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
       });
     }
-  }
-
-  private addReviewRow(containerEl: HTMLElement, label: string, level: ReviewLevel): void {
-    const review = this.plugin.settings.reviews[level];
-    const setting = new Setting(containerEl).setName(`${label} review`);
-
-    setting.addToggle((toggle) => {
-      toggle.setValue(review.enabled).onChange(async (value) => {
-        review.enabled = value;
-        await this.plugin.saveSettings();
-      });
-    });
-
-    if (level === "weekly") {
-      setting.addDropdown((dropdown) => {
-        dropdown
-          .addOptions(WEEKDAY_LABELS)
-          .setValue(this.plugin.settings.reviews.weekly.promptWeekday)
-          .onChange(async (value) => {
-            this.plugin.settings.reviews.weekly.promptWeekday = value as Weekday;
-            await this.plugin.saveSettings();
-          });
-      });
-    }
-
-    if (level === "monthly") {
-      setting.addText((text) => {
-        text.inputEl.type = "number";
-        text.setValue(String(this.plugin.settings.reviews.monthly.promptDayOfMonth));
-        text.onChange(async (value) => {
-          this.plugin.settings.reviews.monthly.promptDayOfMonth = clamp(
-            parseInteger(value, 1),
-            1,
-            31
-          );
-          await this.plugin.saveSettings();
-        });
-      });
-    }
-
-    if (level === "annual") {
-      setting.addText((text) => {
-        text.setPlaceholder("01-01").setValue(this.plugin.settings.reviews.annual.promptMonthDay);
-        text.onChange(async (value) => {
-          this.plugin.settings.reviews.annual.promptMonthDay = value.trim() || "01-01";
-          await this.plugin.saveSettings();
-        });
-      });
-    }
-
-    setting.addText((text) => {
-      text.inputEl.type = "time";
-      text.setValue(review.promptTime).onChange(async (value) => {
-        review.promptTime = value;
-        await this.plugin.saveSettings();
-      });
-    });
-
-    this.addTextSetting(containerEl, `${label} note format`, review.noteNameFormat, async (value) => {
-      review.noteNameFormat = value || DEFAULT_SETTINGS.reviews[level].noteNameFormat;
-      await this.plugin.saveSettings();
-    });
   }
 
   private addToggleSetting(

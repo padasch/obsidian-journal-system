@@ -24,27 +24,21 @@ long-form journal heading.
 
 ## Current settings
 
-The settings tab already includes controls for:
+The settings tab is organized into:
 
-- Daily prompt times, weekdays, snooze duration, missed-prompt catch-up, and
-  desktop journal modal font size.
-- Daily note folder, date format, long-entry heading, and short-capture section.
-- Daily field labels and property names for `journalShort`, `journalLong`,
-  `journalLocation`, and `journalMood`.
-- Additional user-defined properties with text, number, date, multi-select, or
-  checkbox property types.
-- Per-field placeholder text for all journal fields.
-- Automatic property names for journal type, date, time, weekday, ISO week,
-  month, and year.
-- Weekly, monthly, and annual review schedules.
-- Review properties such as `journalHighlights`, `journalDifficulties`,
-  `journalImprovements`, `journalLife`, `journalWork`, and `journalThemes`.
-- Review checklist prompts per level.
-- Review content options for inline Bases, long-entry embeds by review level,
-  generated Base columns, per-column Base widths, and Base row height.
-- Folder fields use Obsidian's native fuzzy selection modal for quick selection.
-- Folder fields accept date tokens in braces, for example `journal/{YYYY}`, and show
-  the parsed folder underneath the setting.
+- Basic settings for shared UI and review-workspace headings.
+- Property settings shared across all notes, including automatic properties,
+  daily modal properties, and review properties such as `journalHighlights`,
+  `journalDifficulties`, `journalImprovements`, `journalLife`, `journalWork`, and
+  `journalThemes`.
+- Bases settings shared across all notes, including inline Bases, generated Base
+  columns, per-column Base widths, display names, and row height.
+- Separate Daily, Weekly, Monthly, and Annual settings sections for prompts,
+  note formats, checklist prompts, and per-level long-entry embed behavior.
+
+Folder fields use Obsidian's native fuzzy selection modal for quick selection.
+Folder fields accept date tokens in braces, for example `journal/{YYYY}`, and show
+the parsed folder underneath the setting.
 
 ## Current commands
 
