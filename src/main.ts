@@ -29,9 +29,6 @@ type JournalPropertyType = "text" | "number" | "date" | "multiselect" | "checkbo
 type JournalPropertyRole =
   | "short"
   | "long"
-  | "wins"
-  | "fails"
-  | "topics"
   | "location"
   | "mood"
   | "custom";
@@ -146,7 +143,7 @@ interface JournalValue {
   value: string | number | string[] | boolean;
 }
 
-const SETTINGS_SCHEMA_VERSION = 6;
+const SETTINGS_SCHEMA_VERSION = 7;
 const moment = obsidianMoment as unknown as () => Moment;
 
 const WEEKDAYS: Weekday[] = [
@@ -220,6 +217,18 @@ const DEFAULT_REVIEW_BASE_COLUMN_SIZES: BaseColumnSizes = {
   journalLife: 320,
   journalWork: 320,
   journalThemes: 180,
+};
+
+const LEGACY_DAILY_PROPERTY_IDS = new Set([
+  "journalWins",
+  "journalFails",
+  "journalTopics",
+]);
+
+const LEGACY_REVIEW_PROPERTY_RENAMES: Record<string, string> = {
+  journalWins: "journalHighlights",
+  journalFails: "journalDifficulties",
+  journalTopics: "journalThemes",
 };
 
 const REVIEW_BASE_START = "<!-- JOURNALING-SYSTEM:BASE:START -->";
@@ -1027,7 +1036,7 @@ export default class JournalingSystemPlugin extends Plugin {
     const typeProperty =
       this.settings.automaticProperties.type.trim() ||
       DEFAULT_SETTINGS.automaticProperties.type;
-    const columns = normalizeBaseProperties(this.settings.reviews.baseProperties);
+    const columns = normalizeDailyBaseProperties(this.settings.reviews.baseProperties);
     const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
     const columnSizes = this.getReviewBaseColumnSizes(columns);
 
@@ -1234,11 +1243,9 @@ export default class JournalingSystemPlugin extends Plugin {
   }
 
   getReviewBaseProperties(level: ReviewLevel): string[] {
-    return normalizeBaseProperties(
-      level === "weekly"
-        ? this.settings.reviews.baseProperties
-        : this.settings.reviews.reviewBaseProperties
-    );
+    return level === "weekly"
+      ? normalizeDailyBaseProperties(this.settings.reviews.baseProperties)
+      : normalizeReviewBaseProperties(this.settings.reviews.reviewBaseProperties);
   }
 
   getReviewBaseColumnSizes(columns: string[]): Array<[string, number]> {
@@ -2319,15 +2326,17 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     header.createDiv({ text: "Property" });
     header.createDiv({ text: "Column width" });
 
-    const selectedProperties = new Set(
-      normalizeBaseProperties(this.plugin.settings.reviews[key])
+    const configuredProperties = normalizeBasePropertiesForKey(
+      key,
+      this.plugin.settings.reviews[key]
     );
+    const selectedProperties = new Set(configuredProperties);
     const availablePropertySet = new Set(availableProperties);
     const columnSizes = normalizeBaseColumnSizes(
       this.plugin.settings.reviews.baseColumnSizes
     );
     const rows = dedupeProperties([
-      ...normalizeBaseProperties(this.plugin.settings.reviews[key]),
+      ...configuredProperties,
       ...availableProperties,
       ...Object.keys(columnSizes).filter(
         (property) => selectedProperties.has(property) || availablePropertySet.has(property)
@@ -2340,7 +2349,10 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       checkbox.checked = selectedProperties.has(property);
       checkbox.ariaLabel = `Show ${property} in review Bases`;
       checkbox.addEventListener("change", async () => {
-        const current = normalizeBaseProperties(this.plugin.settings.reviews[key]);
+        const current = normalizeBasePropertiesForKey(
+          key,
+          this.plugin.settings.reviews[key]
+        );
         this.plugin.settings.reviews[key] = checkbox.checked
           ? dedupeProperties([...current, property])
           : current.filter((entry) => entry !== property);
@@ -2559,14 +2571,25 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   const savedSchemaVersion = getSavedSchemaVersion(migrated);
   const settings = mergeDefaults(defaults, migrated);
   settings.ui.modalFontSizePx = normalizeModalFontSize(settings.ui.modalFontSizePx);
-  settings.properties = normalizePropertyDefinitions(settings.properties, savedSchemaVersion);
-  settings.reviews.baseProperties = normalizeBaseProperties(settings.reviews.baseProperties);
-  if (settings.reviews.baseProperties.length === 0 && savedSchemaVersion < 5) {
+  settings.properties = normalizePropertyDefinitions(settings.properties);
+  settings.reviews.baseProperties = normalizeDailyBaseProperties(
+    settings.reviews.baseProperties
+  );
+  if (
+    settings.reviews.baseProperties.length === 0 &&
+    savedSchemaVersion < SETTINGS_SCHEMA_VERSION
+  ) {
     settings.reviews.baseProperties = getAvailableBasePropertiesFromSettings(settings, "daily");
   }
-  settings.reviews.reviewBaseProperties = normalizeBaseProperties(
+  settings.reviews.reviewBaseProperties = normalizeReviewBaseProperties(
     settings.reviews.reviewBaseProperties
   );
+  if (
+    settings.reviews.reviewBaseProperties.length === 0 &&
+    savedSchemaVersion < SETTINGS_SCHEMA_VERSION
+  ) {
+    settings.reviews.reviewBaseProperties = [...DEFAULT_REVIEW_SOURCE_BASE_PROPERTIES];
+  }
   settings.reviews.baseRowHeight = normalizeBaseRowHeight(settings.reviews.baseRowHeight);
   settings.reviews.baseColumnSizes = normalizeBaseColumnSizes(
     settings.reviews.baseColumnSizes
@@ -2662,19 +2685,10 @@ function migrateLegacySettings(saved: Record<string, unknown>): Record<string, u
 }
 
 function normalizePropertyDefinitions(
-  properties: JournalPropertyDefinition[],
-  savedSchemaVersion: number
+  properties: JournalPropertyDefinition[]
 ): JournalPropertyDefinition[] {
-  const removedDailyBuiltIns = new Set(["journalWins", "journalFails", "journalTopics"]);
-
   return properties
-    .filter((property) => {
-      if (savedSchemaVersion >= 6) {
-        return true;
-      }
-
-      return !(property.builtIn === true && removedDailyBuiltIns.has(property.id));
-    })
+    .filter((property) => !isLegacyDailyPropertyDefinition(property))
     .map((property) => {
       const defaultProperty = DEFAULT_PROPERTIES.find(
         (definition) => definition.id === property.id
@@ -2688,6 +2702,18 @@ function normalizePropertyDefinitions(
             : defaultProperty?.placeholder ?? "",
       };
     });
+}
+
+function isLegacyDailyPropertyDefinition(property: JournalPropertyDefinition): boolean {
+  const propertyName = property.property.trim();
+  const role = property.role as string;
+  return (
+    LEGACY_DAILY_PROPERTY_IDS.has(property.id) ||
+    LEGACY_DAILY_PROPERTY_IDS.has(propertyName) ||
+    role === "wins" ||
+    role === "fails" ||
+    role === "topics"
+  );
 }
 
 function assignFrontmatterProperty(
@@ -2898,6 +2924,32 @@ function normalizeBaseProperties(value: unknown): string[] {
   return [];
 }
 
+function normalizeDailyBaseProperties(value: unknown): string[] {
+  return normalizeBaseProperties(value).filter(
+    (property) => !LEGACY_DAILY_PROPERTY_IDS.has(normalizeBaseColumnSizeProperty(property))
+  );
+}
+
+function normalizeReviewBaseProperties(value: unknown): string[] {
+  return dedupeProperties(
+    normalizeBaseProperties(value).map((property) => renameLegacyReviewProperty(property))
+  );
+}
+
+function normalizeBasePropertiesForKey(
+  key: BasePropertyListKey,
+  value: unknown
+): string[] {
+  return key === "baseProperties"
+    ? normalizeDailyBaseProperties(value)
+    : normalizeReviewBaseProperties(value);
+}
+
+function renameLegacyReviewProperty(property: string): string {
+  const clean = normalizeBaseColumnSizeProperty(property);
+  return LEGACY_REVIEW_PROPERTY_RENAMES[clean] ?? clean;
+}
+
 function normalizeBaseColumnSizes(value: unknown): BaseColumnSizes {
   if (!isRecord(value)) {
     return {};
@@ -2905,7 +2957,7 @@ function normalizeBaseColumnSizes(value: unknown): BaseColumnSizes {
 
   const normalized: BaseColumnSizes = {};
   for (const [property, size] of Object.entries(value)) {
-    const cleanProperty = normalizeBaseColumnSizeProperty(property);
+    const cleanProperty = renameLegacyReviewProperty(property);
     const cleanSize = normalizeBaseColumnSize(size);
     if (cleanProperty.length > 0 && cleanSize !== null) {
       normalized[cleanProperty] = cleanSize;
