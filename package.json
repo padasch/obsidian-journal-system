@@ -1,6 +1,6 @@
 {
   "name": "journaling-system",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Structured daily journaling prompts and periodic review support for Obsidian.",
   "main": "main.js",
   "scripts": {
