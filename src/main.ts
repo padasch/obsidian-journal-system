@@ -35,7 +35,7 @@ type JournalPropertyRole =
 type RollupSource = "hybrid-hierarchy" | "daily-notes" | "prior-reviews";
 type ReviewLevel = "weekly" | "monthly" | "annual";
 type JournalType = "daily" | ReviewLevel;
-type BaseRowHeight = "default" | "short" | "medium" | "tall" | "extra-tall";
+type BaseRowHeight = "default" | "short" | "medium" | "tall" | "extra";
 type BaseColumnSizes = Record<string, number>;
 type BasePropertyListKey = "baseProperties" | "reviewBaseProperties";
 type DailyPromptBehavior = "always" | "if-no-quick-entry";
@@ -195,7 +195,7 @@ const BASE_ROW_HEIGHT_LABELS: Record<BaseRowHeight, string> = {
   short: "Short",
   medium: "Medium",
   tall: "Tall",
-  "extra-tall": "Extra tall",
+  extra: "Extra tall",
 };
 
 const DAILY_PROMPT_BEHAVIOR_LABELS: Record<DailyPromptBehavior, string> = {
@@ -466,7 +466,7 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     longEntriesHeading: "Long entries",
     baseProperties: [...DEFAULT_REVIEW_BASE_PROPERTIES],
     reviewBaseProperties: [...DEFAULT_REVIEW_SOURCE_BASE_PROPERTIES],
-    baseRowHeight: "extra-tall",
+    baseRowHeight: "extra",
     baseColumnSizes: { ...DEFAULT_REVIEW_BASE_COLUMN_SIZES },
     reviewProperties: DEFAULT_REVIEW_PROPERTIES.map((property) => ({ ...property })),
     checklistItems: cloneChecklistItems(DEFAULT_REVIEW_CHECKLIST_ITEMS),
@@ -1186,6 +1186,7 @@ export default class JournalingSystemPlugin extends Plugin {
   createReviewFieldsBaseBlock(level: ReviewLevel): string[] {
     const columns = this.getReviewFieldsBaseProperties(level);
     const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
+    const encodedRowHeight = encodeBaseRowHeight(rowHeight);
     const columnSizes = this.getReviewBaseColumnSizes(columns);
     const displayNames = getBasePropertyDisplayNames(columns);
 
@@ -1198,7 +1199,7 @@ export default class JournalingSystemPlugin extends Plugin {
       "views:",
       "  - type: table",
       "    name: Review fields",
-      ...(rowHeight === "default" ? [] : [`    rowHeight: ${rowHeight}`]),
+      ...(rowHeight === "default" ? [] : [`    rowHeight: ${encodedRowHeight}`]),
       ...(columnSizes.length > 0
         ? [
             "    columnSize:",
@@ -1224,6 +1225,7 @@ export default class JournalingSystemPlugin extends Plugin {
       DEFAULT_SETTINGS.automaticProperties.type;
     const columns = this.getReviewBaseProperties(level);
     const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
+    const encodedRowHeight = encodeBaseRowHeight(rowHeight);
     const columnSizes = this.getReviewBaseColumnSizes(columns);
     const displayNames = getBasePropertyDisplayNames(columns);
 
@@ -1237,7 +1239,7 @@ export default class JournalingSystemPlugin extends Plugin {
       "views:",
       "  - type: table",
       `    name: ${source.name}`,
-      ...(rowHeight === "default" ? [] : [`    rowHeight: ${rowHeight}`]),
+      ...(rowHeight === "default" ? [] : [`    rowHeight: ${encodedRowHeight}`]),
       ...(columnSizes.length > 0
         ? [
             "    columnSize:",
@@ -1263,6 +1265,7 @@ export default class JournalingSystemPlugin extends Plugin {
       DEFAULT_SETTINGS.automaticProperties.type;
     const columns = normalizeDailyBaseProperties(this.settings.reviews.baseProperties);
     const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
+    const encodedRowHeight = encodeBaseRowHeight(rowHeight);
     const columnSizes = this.getReviewBaseColumnSizes(columns);
     const displayNames = getBasePropertyDisplayNames(columns);
 
@@ -1276,7 +1279,7 @@ export default class JournalingSystemPlugin extends Plugin {
       "views:",
       "  - type: table",
       `    name: ${source.name}`,
-      ...(rowHeight === "default" ? [] : [`    rowHeight: ${rowHeight}`]),
+      ...(rowHeight === "default" ? [] : [`    rowHeight: ${encodedRowHeight}`]),
       ...(columnSizes.length > 0
         ? [
             "    columnSize:",
@@ -3818,13 +3821,21 @@ function parseLineList(value: string): string[] {
 }
 
 function normalizeBaseRowHeight(value: unknown): BaseRowHeight {
+  if (value === "extra-tall") {
+    return "extra";
+  }
+
   return value === "short" ||
     value === "medium" ||
     value === "tall" ||
-    value === "extra-tall" ||
+    value === "extra" ||
     value === "default"
     ? value
-    : "extra-tall";
+    : "extra";
+}
+
+function encodeBaseRowHeight(value: BaseRowHeight): string {
+  return value;
 }
 
 function normalizeDailyPromptBehavior(value: unknown): DailyPromptBehavior {

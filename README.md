@@ -125,7 +125,8 @@ widths are set for `journalShort`, `journalLocation`, `journalHighlights`,
 `journalDifficulties`, `journalImprovements`, `journalLife`, `journalWork`, and
 `journalThemes`. Generated Bases also set display names for configured columns, so
 properties such as `journalWeek` and `journalDifficulties` render as `Week` and
-`Difficulties`. The default generated Base row height is `extra-tall`.
+`Difficulties`. The default setting is shown as `Extra tall` and generated Bases
+write it as `rowHeight: extra`.
 
 When long-entry embeds are enabled for a review level, review notes scan matching
 daily notes and embed `## Journal` sections that contain actual text. The
