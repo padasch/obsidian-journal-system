@@ -1002,6 +1002,7 @@ export default class JournalingSystemPlugin extends Plugin {
     const columns = this.getReviewBaseProperties(level);
     const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
     const columnSizes = this.getReviewBaseColumnSizes(columns);
+    const displayNames = getBasePropertyDisplayNames(columns);
 
     return [
       "```base",
@@ -1009,6 +1010,7 @@ export default class JournalingSystemPlugin extends Plugin {
       "  and:",
       `    - ${formatBasePropertyReference(typeProperty)} == ${formatBaseString(source.journalType)}`,
       `    - ${formatBasePropertyReference(source.period.property)} == ${formatBaseString(source.period.value)}`,
+      ...formatBasePropertyDisplayNameBlock(displayNames),
       "views:",
       "  - type: table",
       `    name: ${source.name}`,
@@ -1039,6 +1041,7 @@ export default class JournalingSystemPlugin extends Plugin {
     const columns = normalizeDailyBaseProperties(this.settings.reviews.baseProperties);
     const rowHeight = normalizeBaseRowHeight(this.settings.reviews.baseRowHeight);
     const columnSizes = this.getReviewBaseColumnSizes(columns);
+    const displayNames = getBasePropertyDisplayNames(columns);
 
     return [
       "```base",
@@ -1046,6 +1049,7 @@ export default class JournalingSystemPlugin extends Plugin {
       "  and:",
       `    - ${formatBasePropertyReference(typeProperty)} == ${formatBaseString("daily")}`,
       `    - ${formatBasePropertyReference(source.period.property)} == ${formatBaseString(source.period.value)}`,
+      ...formatBasePropertyDisplayNameBlock(displayNames),
       "views:",
       "  - type: table",
       `    name: ${source.name}`,
@@ -3027,6 +3031,47 @@ function formatBaseColumnSizeKey(property: string): string {
   return /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(reference)
     ? reference
     : JSON.stringify(reference);
+}
+
+function getBasePropertyDisplayNames(columns: string[]): Array<[string, string]> {
+  return columns.map((property) => [
+    formatBaseColumnSizeKey(property),
+    formatBasePropertyDisplayName(property),
+  ]);
+}
+
+function formatBasePropertyDisplayName(property: string): string {
+  const clean = normalizeBaseColumnSizeProperty(property);
+  const withoutJournal = clean.replace(/^journal/i, "");
+  const labelSource = withoutJournal.length > 0 ? withoutJournal : clean;
+  return titleCaseWords(labelSource);
+}
+
+function formatBasePropertyDisplayNameBlock(displayNames: Array<[string, string]>): string[] {
+  if (displayNames.length === 0) {
+    return [];
+  }
+
+  return [
+    "properties:",
+    ...displayNames.flatMap(([property, displayName]) => [
+      `  ${property}:`,
+      `    displayName: ${formatBaseString(displayName)}`,
+    ]),
+  ];
+}
+
+function titleCaseWords(value: string): string {
+  return value
+    .replace(/\./g, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter((part) => part.length > 0)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }
 
 function formatBaseString(value: string): string {

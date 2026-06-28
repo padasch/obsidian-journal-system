@@ -74,7 +74,9 @@ Review Base columns can be selected separately for daily-source Bases and
 review-source Bases, with an optional column-width field for each property. Default
 widths are set for `journalShort`, `journalLocation`, `journalHighlights`,
 `journalDifficulties`, `journalImprovements`, `journalLife`, `journalWork`, and
-`journalThemes`.
+`journalThemes`. Generated Bases also set display names for configured columns, so
+properties such as `journalWeek` and `journalDifficulties` render as `Week` and
+`Difficulties`.
 
 When long-entry embeds are enabled for a review level, review notes embed matching
 daily `## Journal` sections for notes whose long-entry property is true.
