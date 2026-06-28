@@ -52,6 +52,8 @@ The settings tab is organized into:
   columns, per-column Base widths, display names, and row height.
 - Separate Daily, Weekly, Monthly, and Annual settings sections for prompts,
   note formats, checklist prompts, and per-level long-entry embed behavior.
+- Appearance settings for desktop modal text size, width, height, and weekly
+  review context height.
 
 The settings page also includes a boxed foldable overview explaining the intended
 workflow. Major settings groups are boxed collapsible sections so the page stays
@@ -79,6 +81,8 @@ scannable as options grow.
   creation. Weekly, monthly, and annual settings control the review prompt
   schedule, review note name format, checklist prompts, and whether that level
   embeds daily long entries.
+- Appearance settings control desktop modal sizing. Mobile keeps the compact
+  top-half modal layout.
 - Default review note name formats are `YYYY - [Week] WW`, `YYYY-MM MMMM`, and
   `YYYY [Annual Review]`.
 

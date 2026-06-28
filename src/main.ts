@@ -68,6 +68,9 @@ interface JournalingSystemSettings {
   schemaVersion: number;
   ui: {
     modalFontSizePx: number;
+    modalWidthPx: number;
+    modalMaxHeightVh: number;
+    reviewContextHeightPx: number;
   };
   dailyPrompts: {
     enabled: boolean;
@@ -397,6 +400,9 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
   schemaVersion: SETTINGS_SCHEMA_VERSION,
   ui: {
     modalFontSizePx: 15,
+    modalWidthPx: 860,
+    modalMaxHeightVh: 86,
+    reviewContextHeightPx: 360,
   },
   dailyPrompts: {
     enabled: true,
@@ -1834,10 +1840,7 @@ class WeeklyReviewWizardModal extends Modal {
 
   private async load(): Promise<void> {
     this.modalEl.addClass("journaling-system-modal-shell");
-    this.modalEl.style.setProperty(
-      "--journaling-system-modal-font-size",
-      `${normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx)}px`
-    );
+    applyModalAppearance(this.modalEl, this.plugin.settings);
     this.contentEl.addClass("journaling-system-modal");
     this.setTitle("Weekly review wizard");
     this.contentEl.empty();
@@ -2048,10 +2051,7 @@ class JournalingPromptModal extends Modal {
     this.inputs.clear();
     contentEl.empty();
     this.modalEl.addClass("journaling-system-modal-shell");
-    this.modalEl.style.setProperty(
-      "--journaling-system-modal-font-size",
-      `${normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx)}px`
-    );
+    applyModalAppearance(this.modalEl, this.plugin.settings);
     contentEl.addClass("journaling-system-modal");
     this.setTitle(`Journal entry for ${moment().format("YYYY-MM-DD dddd")}`);
 
@@ -2311,6 +2311,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.displayReviewLevelSettings(containerEl, "Weekly", "weekly");
     this.displayReviewLevelSettings(containerEl, "Monthly", "monthly");
     this.displayReviewLevelSettings(containerEl, "Annual", "annual");
+    this.displayAppearanceSettings(containerEl);
   }
 
   private displaySystemIdea(containerEl: HTMLElement): void {
@@ -2339,7 +2340,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     body.createEl("h4", { text: "Settings map" });
     const list = body.createEl("ul");
     list.createEl("li", {
-      text: "Basic settings control shared headings, the review folder, and journal modal appearance.",
+      text: "Basic settings control shared headings and the review folder.",
     });
     list.createEl("li", {
       text: "Property settings define the YAML property names and the fields shown in daily and review notes.",
@@ -2350,32 +2351,16 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     list.createEl("li", {
       text: "Daily, Weekly, Monthly, and Annual settings control each note type's prompt schedule, note naming, and level-specific review behavior.",
     });
+    list.createEl("li", {
+      text: "Appearance settings control modal size and text size for the daily prompt and weekly review wizard.",
+    });
   }
 
   private displayBasicSettings(containerEl: HTMLElement): void {
     const section = createSettingsSection(containerEl, "Basic settings");
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "Shared defaults for the journal modal and generated review-note workspace. Schedules and note naming are configured in the level-specific sections below.",
-    });
-
-    const modalFontSize = normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx);
-    const fontSizeSetting = new Setting(section)
-      .setName("Journal modal font size")
-      .setDesc("Desktop-only text size for the daily journal prompt. Mobile keeps the compact native layout.");
-    fontSizeSetting.addSlider((slider) => {
-      const formattedSlider = slider as typeof slider & {
-        setDisplayFormat?: (format: (value: number) => string) => typeof slider;
-      };
-      formattedSlider.setDisplayFormat?.((value) => `${value}px`);
-      slider
-        .setLimits(12, 20, 1)
-        .setValue(modalFontSize)
-        .onChange(async (value) => {
-          const normalized = normalizeModalFontSize(value);
-          this.plugin.settings.ui.modalFontSizePx = normalized;
-          await this.plugin.saveSettings();
-        });
+      text: "Shared defaults for generated review-note workspaces. Schedules and note naming are configured in the level-specific sections below.",
     });
 
     this.addFolderSetting(
@@ -2783,6 +2768,63 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     }
 
     return "Annual reviews synthesize direction from monthly reviews. Keep annual properties high-level so the year view stays readable.";
+  }
+
+  private displayAppearanceSettings(containerEl: HTMLElement): void {
+    const section = createSettingsSection(containerEl, "Appearance settings");
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Desktop modal sizing for the daily journal prompt and weekly review wizard. Mobile keeps the compact top-half layout.",
+    });
+
+    this.addSliderSetting(
+      section,
+      "Modal text size",
+      "Text size used inside journaling modals on desktop.",
+      normalizeModalFontSize(this.plugin.settings.ui.modalFontSizePx),
+      { min: 12, max: 20, step: 1, unit: "px" },
+      async (value) => {
+        this.plugin.settings.ui.modalFontSizePx = normalizeModalFontSize(value);
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addSliderSetting(
+      section,
+      "Modal width",
+      "Maximum desktop modal width. Wider modals make review context easier to scan.",
+      normalizeModalWidth(this.plugin.settings.ui.modalWidthPx),
+      { min: 640, max: 1100, step: 20, unit: "px" },
+      async (value) => {
+        this.plugin.settings.ui.modalWidthPx = normalizeModalWidth(value);
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addSliderSetting(
+      section,
+      "Modal max height",
+      "Maximum desktop modal height as a percentage of the viewport.",
+      normalizeModalMaxHeight(this.plugin.settings.ui.modalMaxHeightVh),
+      { min: 60, max: 94, step: 2, unit: "vh" },
+      async (value) => {
+        this.plugin.settings.ui.modalMaxHeightVh = normalizeModalMaxHeight(value);
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addSliderSetting(
+      section,
+      "Weekly context height",
+      "Scrollable daily-context area inside the weekly review wizard.",
+      normalizeReviewContextHeight(this.plugin.settings.ui.reviewContextHeightPx),
+      { min: 180, max: 560, step: 20, unit: "px" },
+      async (value) => {
+        this.plugin.settings.ui.reviewContextHeightPx =
+          normalizeReviewContextHeight(value);
+        await this.plugin.saveSettings();
+      }
+    );
   }
 
   private displayPropertySettings(containerEl: HTMLElement): void {
@@ -3219,6 +3261,29 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     });
   }
 
+  private addSliderSetting(
+    containerEl: HTMLElement,
+    name: string,
+    description: string,
+    value: number,
+    limits: { min: number; max: number; step: number; unit: string },
+    onChange: (value: number) => Promise<void>
+  ): void {
+    const setting = new Setting(containerEl).setName(name).setDesc(description);
+    setting.addSlider((slider) => {
+      const formattedSlider = slider as typeof slider & {
+        setDisplayFormat?: (format: (value: number) => string) => typeof slider;
+      };
+      formattedSlider.setDisplayFormat?.((sliderValue) => `${sliderValue}${limits.unit}`);
+      slider
+        .setLimits(limits.min, limits.max, limits.step)
+        .setValue(value)
+        .onChange(async (sliderValue) => {
+          await onChange(sliderValue);
+        });
+    });
+  }
+
   private addTextSetting(
     containerEl: HTMLElement,
     name: string,
@@ -3356,6 +3421,13 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   const settings = mergeDefaults(defaults, migrated);
   migrateDefaultReviewFormats(settings, savedSchemaVersion);
   settings.ui.modalFontSizePx = normalizeModalFontSize(settings.ui.modalFontSizePx);
+  settings.ui.modalWidthPx = normalizeModalWidth(settings.ui.modalWidthPx);
+  settings.ui.modalMaxHeightVh = normalizeModalMaxHeight(
+    settings.ui.modalMaxHeightVh
+  );
+  settings.ui.reviewContextHeightPx = normalizeReviewContextHeight(
+    settings.ui.reviewContextHeightPx
+  );
   settings.dailyPrompts.promptBehavior = normalizeDailyPromptBehavior(
     settings.dailyPrompts.promptBehavior
   );
@@ -4534,9 +4606,46 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function applyModalAppearance(
+  modalEl: HTMLElement,
+  settings: JournalingSystemSettings
+): void {
+  modalEl.style.setProperty(
+    "--journaling-system-modal-font-size",
+    `${normalizeModalFontSize(settings.ui.modalFontSizePx)}px`
+  );
+  modalEl.style.setProperty(
+    "--journaling-system-modal-width",
+    `${normalizeModalWidth(settings.ui.modalWidthPx)}px`
+  );
+  modalEl.style.setProperty(
+    "--journaling-system-modal-max-height",
+    `${normalizeModalMaxHeight(settings.ui.modalMaxHeightVh)}vh`
+  );
+  modalEl.style.setProperty(
+    "--journaling-system-review-context-max-height",
+    `${normalizeReviewContextHeight(settings.ui.reviewContextHeightPx)}px`
+  );
+}
+
 function normalizeModalFontSize(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number(value);
   return clamp(Number.isFinite(parsed) ? Math.round(parsed) : 15, 12, 20);
+}
+
+function normalizeModalWidth(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return clamp(Number.isFinite(parsed) ? Math.round(parsed) : 860, 640, 1100);
+}
+
+function normalizeModalMaxHeight(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return clamp(Number.isFinite(parsed) ? Math.round(parsed) : 86, 60, 94);
+}
+
+function normalizeReviewContextHeight(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return clamp(Number.isFinite(parsed) ? Math.round(parsed) : 360, 180, 560);
 }
 
 function ensureMarkdownExtension(fileName: string): string {

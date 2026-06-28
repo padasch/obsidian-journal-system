@@ -243,11 +243,14 @@
 
 .modal.journaling-system-modal-shell {
   --journaling-system-modal-font-size: 15px;
+  --journaling-system-modal-max-height: 86vh;
+  --journaling-system-modal-width: 860px;
+  --journaling-system-review-context-max-height: 360px;
   align-self: center;
   margin-top: 0;
-  max-height: none;
-  overflow: visible;
-  width: min(760px, calc(100vw - 64px));
+  max-height: var(--journaling-system-modal-max-height);
+  overflow: hidden;
+  width: min(var(--journaling-system-modal-width), calc(100vw - 64px));
 }
 
 .modal.journaling-system-modal-shell .modal-title {
@@ -269,8 +272,9 @@
 }
 
 .modal.journaling-system-modal-shell .modal-content {
-  max-height: none;
-  overflow: visible;
+  max-height: calc(var(--journaling-system-modal-max-height) - 72px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding-bottom: 12px;
 }
 
@@ -314,7 +318,7 @@
   flex-direction: column;
   gap: 8px;
   margin-top: 10px;
-  max-height: 240px;
+  max-height: var(--journaling-system-review-context-max-height);
   overflow: auto;
   padding-right: 4px;
 }
@@ -448,6 +452,10 @@
 
   .journaling-system-suggestion {
     font-size: var(--font-ui-medium);
+  }
+
+  .journaling-system-review-wizard-context-body {
+    max-height: 160px;
   }
 
   .journaling-system-weekday-row,
