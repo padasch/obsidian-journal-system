@@ -16,8 +16,9 @@ long-form journal heading.
 - Monthly reviews synthesize patterns from weekly reviews.
 - Annual reviews focus on direction and identity-level reflection from monthly
   reviews.
-- Open the daily note for longer writing under `## Journal`, set the long-entry
-  property to true, and place the cursor in the journal section.
+- Open the daily note for longer writing under `## Journal`, add a hidden write
+  marker, synchronize the long-entry property from actual section text, and place
+  the cursor where writing should start.
 - Prompt for daily, weekly, monthly, and annual reviews on configurable schedules.
 - Generate review workspaces with checklist prompts, source Bases, and fillable
   review properties while preserving user-written reflection.
@@ -109,11 +110,22 @@ widths are set for `journalShort`, `journalLocation`, `journalHighlights`,
 properties such as `journalWeek` and `journalDifficulties` render as `Week` and
 `Difficulties`.
 
-When long-entry embeds are enabled for a review level, review notes embed matching
-daily `## Journal` sections for notes whose long-entry property is true.
+When long-entry embeds are enabled for a review level, review notes scan matching
+daily notes and embed `## Journal` sections that contain actual text. The
+long-entry property is synchronized from that scan so Bases can still display or
+filter it, but an empty section with a stale true property will not be embedded.
 Each embedded long entry is preceded by a bold `YYYY-MM-DD dddd` label.
 Generated review notes avoid visible management comments; old placeholder Rollup
 sections and generated marker comments are cleaned up when review notes are reopened.
+
+Daily long-entry sections include this edit-mode marker below the configured
+heading:
+
+```md
+<!-- Journaling System: long journal entry starts here. Write below this line. -->
+```
+
+The marker is ignored by the scanner and is hidden in rendered notes/embeds.
 
 ## Development
 

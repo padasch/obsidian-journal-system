@@ -239,6 +239,8 @@ const REVIEW_LONG_ENTRIES_START = "<!-- JOURNALING-SYSTEM:LONG-ENTRIES:START -->
 const REVIEW_LONG_ENTRIES_END = "<!-- JOURNALING-SYSTEM:LONG-ENTRIES:END -->";
 const LEGACY_LONG_ENTRIES_PLACEHOLDER =
   "<!-- Long-entry embeds will be generated in a later milestone. -->";
+const LONG_ENTRY_START_MARKER =
+  "<!-- Journaling System: long journal entry starts here. Write below this line. -->";
 const REVIEW_ROLLUP_START = "<!-- JOURNALING-SYSTEM:ROLLUP:START -->";
 const REVIEW_ROLLUP_END = "<!-- JOURNALING-SYSTEM:ROLLUP:END -->";
 
@@ -526,6 +528,32 @@ export default class JournalingSystemPlugin extends Plugin {
     return longProperty ?? DEFAULT_PROPERTIES[1];
   }
 
+  async syncLongEntryStatus(file: TFile): Promise<boolean> {
+    const content = await this.app.vault.read(file);
+    const hasContent = hasLongJournalEntryContent(
+      content,
+      this.settings.dailyNote.longEntryHeading
+    );
+    const longProperty = this.getLongProperty().property.trim();
+
+    if (longProperty.length === 0) {
+      return hasContent;
+    }
+
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const currentValue = isRecord(frontmatter)
+      ? isTruthyFrontmatterValue(frontmatter[longProperty])
+      : false;
+
+    if (currentValue !== hasContent) {
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        frontmatter[longProperty] = hasContent;
+      });
+    }
+
+    return hasContent;
+  }
+
   getTodayContext(now = moment()): {
     date: string;
     time: string;
@@ -640,7 +668,7 @@ export default class JournalingSystemPlugin extends Plugin {
       ...values,
       { definition: this.getLongProperty(), value: true },
     ]);
-    await this.ensureHeading(file, this.settings.dailyNote.longEntryHeading);
+    await this.ensureLongEntrySection(file);
     await this.openFileAtHeading(file, this.settings.dailyNote.longEntryHeading);
   }
 
@@ -675,7 +703,7 @@ export default class JournalingSystemPlugin extends Plugin {
 
   createDailyNoteContent(now = moment()): string {
     const title = now.format(this.settings.dailyNote.dateFormat);
-    return `${formatFrontmatterBlock(this.getAutomaticFrontmatter("daily", now))}# ${title}\n\n## ${this.settings.dailyNote.longEntryHeading}\n`;
+    return `${formatFrontmatterBlock(this.getAutomaticFrontmatter("daily", now))}# ${title}\n\n## ${this.settings.dailyNote.longEntryHeading}\n\n${LONG_ENTRY_START_MARKER}\n`;
   }
 
   async getOrCreateReviewNote(level: ReviewLevel, now = moment()): Promise<TFile> {
@@ -693,7 +721,7 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     await this.ensureFolderForPath(notePath);
-    return await this.app.vault.create(notePath, this.createReviewNoteContent(level, now));
+    return await this.app.vault.create(notePath, await this.createReviewNoteContent(level, now));
   }
 
   getReviewNotePath(level: ReviewLevel, now = moment()): string {
@@ -703,7 +731,7 @@ export default class JournalingSystemPlugin extends Plugin {
     return normalizePath([folder, fileName].filter(Boolean).join("/"));
   }
 
-  createReviewNoteContent(level: ReviewLevel, now = moment()): string {
+  async createReviewNoteContent(level: ReviewLevel, now = moment()): Promise<string> {
     const title = now.format(this.settings.reviews[level].noteNameFormat);
     const lines = [
       `# ${title}`,
@@ -741,7 +769,7 @@ export default class JournalingSystemPlugin extends Plugin {
       lines.push(
         `## ${this.settings.reviews.longEntriesHeading}`,
         "",
-        ...this.createLongEntryEmbedsBlock(level, now),
+        ...(await this.createLongEntryEmbedsBlock(level, now)),
         ""
       );
     }
@@ -891,7 +919,7 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     const content = await this.app.vault.read(file);
-    const block = this.createLongEntryEmbedsBlock(level, now).join("\n");
+    const block = (await this.createLongEntryEmbedsBlock(level, now)).join("\n");
     const withManagedBlock = replaceManagedBlock(
       content,
       REVIEW_LONG_ENTRIES_START,
@@ -1159,8 +1187,8 @@ export default class JournalingSystemPlugin extends Plugin {
     return level !== "weekly" && this.settings.reviews.includeDailyBaseOnHigherReviews;
   }
 
-  createLongEntryEmbedsBlock(level: ReviewLevel, now = moment()): string[] {
-    const files = this.getLongEntrySourceFiles(level, now);
+  async createLongEntryEmbedsBlock(level: ReviewLevel, now = moment()): Promise<string[]> {
+    const files = await this.getLongEntrySourceFiles(level, now);
     const dateProperty =
       this.settings.automaticProperties.date.trim() ||
       DEFAULT_SETTINGS.automaticProperties.date;
@@ -1184,39 +1212,53 @@ export default class JournalingSystemPlugin extends Plugin {
     ];
   }
 
-  getLongEntrySourceFiles(level: ReviewLevel, now = moment()): TFile[] {
+  async getLongEntrySourceFiles(level: ReviewLevel, now = moment()): Promise<TFile[]> {
     const automatic = this.settings.automaticProperties;
     const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
     const dateProperty = automatic.date.trim() || DEFAULT_SETTINGS.automaticProperties.date;
-    const longProperty = this.getLongProperty().property.trim() || DEFAULT_PROPERTIES[1].property;
     const period = this.getReviewPeriod(level, now);
 
-    const files = this.app.vault
+    const candidates = this.app.vault
       .getMarkdownFiles()
       .filter((file) => {
         const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-        if (!isRecord(frontmatter)) {
-          return false;
-        }
+        const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
 
-        if (!isTruthyFrontmatterValue(frontmatter[longProperty])) {
-          return false;
-        }
-
-        const journalType = frontmatter[typeProperty];
+        const journalType = frontmatterRecord[typeProperty];
         if (journalType !== undefined && String(journalType) !== "daily") {
           return false;
         }
 
-        return frontmatterMatchesReviewPeriod(frontmatter, period, dateProperty, level);
+        return fileMatchesReviewPeriod(
+          file,
+          frontmatterRecord,
+          period,
+          dateProperty,
+          level
+        );
       })
       .sort((a, b) => {
         const aFrontmatter = this.app.metadataCache.getFileCache(a)?.frontmatter;
         const bFrontmatter = this.app.metadataCache.getFileCache(b)?.frontmatter;
-        const aDate = isRecord(aFrontmatter) ? String(aFrontmatter[dateProperty] ?? "") : "";
-        const bDate = isRecord(bFrontmatter) ? String(bFrontmatter[dateProperty] ?? "") : "";
+        const aDate = getJournalDateKey(
+          a,
+          isRecord(aFrontmatter) ? aFrontmatter : {},
+          dateProperty
+        );
+        const bDate = getJournalDateKey(
+          b,
+          isRecord(bFrontmatter) ? bFrontmatter : {},
+          dateProperty
+        );
         return aDate.localeCompare(bDate) || a.path.localeCompare(b.path);
       });
+
+    const files: TFile[] = [];
+    for (const file of candidates) {
+      if (await this.syncLongEntryStatus(file)) {
+        files.push(file);
+      }
+    }
 
     return dedupeLongEntryFilesByDate(files, (file) => {
       const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
@@ -1317,6 +1359,30 @@ export default class JournalingSystemPlugin extends Plugin {
     await this.app.vault.modify(file, `${content.trimEnd()}\n\n## ${cleanHeading}\n`);
   }
 
+  async ensureLongEntrySection(file: TFile): Promise<void> {
+    const heading = this.settings.dailyNote.longEntryHeading.trim();
+    if (heading.length === 0) {
+      return;
+    }
+
+    await this.ensureHeading(file, heading);
+
+    const content = await this.app.vault.read(file);
+    const headingMatch = findHeadingLine(content, heading);
+    if (!headingMatch) {
+      return;
+    }
+
+    const sectionEnd = findSectionEnd(content, headingMatch);
+    const section = content.slice(headingMatch.end, sectionEnd);
+    if (section.includes(LONG_ENTRY_START_MARKER)) {
+      return;
+    }
+
+    const updated = `${content.slice(0, headingMatch.end)}\n${LONG_ENTRY_START_MARKER}\n${section.replace(/^\s*/, "\n")}${content.slice(sectionEnd)}`;
+    await this.app.vault.modify(file, updated);
+  }
+
   async openFileAtHeading(file: TFile, heading: string): Promise<void> {
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.openFile(file, { active: true });
@@ -1364,14 +1430,21 @@ export default class JournalingSystemPlugin extends Plugin {
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }
 
-  getTodayFrontmatter(now = moment()): Record<string, unknown> {
+  async getTodayFrontmatter(now = moment()): Promise<Record<string, unknown>> {
     const file = this.app.vault.getFileByPath(this.getDailyNotePath(now));
     if (!file) {
       return {};
     }
 
+    const hasLongEntryContent = await this.syncLongEntryStatus(file);
     const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    return isRecord(frontmatter) ? frontmatter : {};
+    const values = isRecord(frontmatter) ? { ...frontmatter } : {};
+    const longProperty = this.getLongProperty().property.trim();
+    if (longProperty.length > 0) {
+      values[longProperty] = hasLongEntryContent;
+    }
+
+    return values;
   }
 }
 
@@ -1470,6 +1543,10 @@ class JournalingPromptModal extends Modal {
   }
 
   onOpen(): void {
+    void this.render();
+  }
+
+  private async render(): Promise<void> {
     const { contentEl } = this;
     this.inputs.clear();
     contentEl.empty();
@@ -1481,7 +1558,7 @@ class JournalingPromptModal extends Modal {
     contentEl.addClass("journaling-system-modal");
     this.setTitle(`Journal entry for ${moment().format("YYYY-MM-DD dddd")}`);
 
-    const initialFrontmatter = this.plugin.getTodayFrontmatter();
+    const initialFrontmatter = await this.plugin.getTodayFrontmatter();
     const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
     const properties = this.plugin
       .getEnabledProperties()
@@ -1824,7 +1901,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addToggleSetting(
       section,
       "Long-entry embeds",
-      "Global switch for embedding matching daily ## Journal sections in review notes. Each review level also has its own switch.",
+      "Global switch for embedding matching daily ## Journal sections in review notes. Entries are included only when the section contains text.",
       "includeLongEntryEmbeds"
     );
     this.addTextSetting(
@@ -2045,7 +2122,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.addTextSetting(
       section,
       "Long-entry heading",
-      "Heading where long journal writing lives inside the daily note. Review embeds target this heading.",
+      "Heading where long journal writing lives inside the daily note. Review embeds scan this section and the plugin adds a hidden write marker below it.",
       this.plugin.settings.dailyNote.longEntryHeading,
       async (value) => {
         this.plugin.settings.dailyNote.longEntryHeading =
@@ -2168,7 +2245,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Long-entry embeds")
-      .setDesc(`Embed matching daily long journal entries in ${label.toLowerCase()} reviews.`)
+      .setDesc(`Embed daily long journal sections in ${label.toLowerCase()} reviews when actual text exists under the configured heading.`)
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.reviews.longEntryEmbedLevels[level] === true)
@@ -3523,6 +3600,34 @@ function frontmatterMatchesReviewPeriod(
   return date.format("YYYY") === period.value;
 }
 
+function fileMatchesReviewPeriod(
+  file: TFile,
+  frontmatter: Record<string, unknown>,
+  period: { property: string; value: string },
+  dateProperty: string,
+  level: ReviewLevel
+): boolean {
+  if (frontmatterMatchesReviewPeriod(frontmatter, period, dateProperty, level)) {
+    return true;
+  }
+
+  const dateMatch = /\d{4}-\d{2}-\d{2}/.exec(file.path);
+  const date = dateMatch ? parseJournalDate(dateMatch[0]) : null;
+  if (!date?.isValid()) {
+    return false;
+  }
+
+  if (level === "weekly") {
+    return date.format("GGGG-[W]WW") === period.value;
+  }
+
+  if (level === "monthly") {
+    return date.format("YYYY-MM") === period.value;
+  }
+
+  return date.format("YYYY") === period.value;
+}
+
 function parseJournalDate(value: string): Moment | null {
   const clean = value.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
@@ -3653,6 +3758,24 @@ function normalizeCaptureEntry(line: string): string {
     .toLowerCase();
 }
 
+function hasLongJournalEntryContent(content: string, heading: string): boolean {
+  const headingMatch = findHeadingLine(content, heading);
+  if (!headingMatch) {
+    return false;
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  const section = content.slice(headingMatch.end, sectionEnd);
+  return stripLongEntryNonContent(section).trim().length > 0;
+}
+
+function stripLongEntryNonContent(section: string): string {
+  return section
+    .replace(LONG_ENTRY_START_MARKER, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .trim();
+}
+
 function findJournalCursorOffset(content: string, heading: string): number {
   const headingMatch = findHeadingLine(content, heading);
   if (!headingMatch) {
@@ -3660,7 +3783,20 @@ function findJournalCursorOffset(content: string, heading: string): number {
   }
 
   const sectionEnd = findSectionEnd(content, headingMatch);
-  const section = content.slice(headingMatch.end, sectionEnd).trim();
+  const rawSection = content.slice(headingMatch.end, sectionEnd);
+  const markerIndex = rawSection.indexOf(LONG_ENTRY_START_MARKER);
+  if (markerIndex >= 0) {
+    const markerEnd = headingMatch.end + markerIndex + LONG_ENTRY_START_MARKER.length;
+    const afterMarker = rawSection.slice(markerIndex + LONG_ENTRY_START_MARKER.length);
+    if (stripLongEntryNonContent(afterMarker).length === 0) {
+      const nextLineStart = content.indexOf("\n", markerEnd);
+      return nextLineStart === -1 ? markerEnd : nextLineStart + 1;
+    }
+
+    return sectionEnd;
+  }
+
+  const section = stripLongEntryNonContent(rawSection);
 
   if (section.length === 0) {
     return headingMatch.end;
