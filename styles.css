@@ -195,6 +195,12 @@
   width: min(420px, 100%);
 }
 
+.journaling-system-ai-prompt-textarea {
+  min-height: 220px;
+  resize: vertical;
+  width: min(680px, 100%);
+}
+
 .journaling-system-remove-property:disabled {
   visibility: hidden;
 }

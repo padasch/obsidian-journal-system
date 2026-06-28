@@ -53,7 +53,7 @@ The settings tab is organized into:
 - Separate Daily, Weekly, Monthly, and Annual settings sections for prompts,
   note formats, checklist prompts, and per-level long-entry embed behavior.
 - Local AI settings for optional Ollama-backed weekly summary guidance, disabled
-  by default.
+  by default, with editable weekly/monthly/annual prompt templates.
 - Appearance settings for desktop modal text size, width, height, and weekly
   review context height.
 
@@ -85,7 +85,8 @@ scannable as options grow.
   embeds daily long entries.
 - Local AI settings connect to Ollama on localhost only. The plugin can check the
   server, explicitly ask Ollama to download the configured model, and save weekly
-  guidance to `journalAISummary`.
+  guidance to `journalAISummary`. AI prompt templates can be edited per review
+  level and reset to their defaults.
 - Appearance settings control desktop modal sizing. Mobile keeps the compact
   top-half modal layout.
 - Default review note name formats are `YYYY - [Week] WW`, `YYYY-MM MMMM`, and
@@ -132,6 +133,8 @@ When local AI review assistance is enabled, the wizard can generate a private
 Ollama-backed weekly summary from the matching daily quick entries and long
 journal sections. The generated text is saved to the configured AI summary
 property, default `journalAISummary`, and displayed in the wizard as guidance.
+Local AI prompt templates support `{{sourceNotes}}` as the insertion point for
+review context; if omitted, source notes are appended automatically.
 
 Review Base columns can be selected separately for daily-source Bases and
 review-source Bases, with an optional column-width field for each property. Default

@@ -48,6 +48,7 @@ interface LocalAiSettings {
   baseUrl: string;
   model: string;
   summaryProperty: string;
+  prompts: Record<ReviewLevel, string>;
 }
 
 interface JournalPropertyDefinition {
@@ -173,7 +174,7 @@ interface DailyReviewSummaryItem {
   hasLongEntry: boolean;
 }
 
-const SETTINGS_SCHEMA_VERSION = 9;
+const SETTINGS_SCHEMA_VERSION = 10;
 const moment = obsidianMoment as unknown as () => Moment;
 
 const WEEKDAYS: Weekday[] = [
@@ -407,6 +408,54 @@ const DEFAULT_REVIEW_CHECKLIST_ITEMS: Record<ReviewLevel, string[]> = {
   ],
 };
 
+const DEFAULT_LOCAL_AI_PROMPTS: Record<ReviewLevel, string> = {
+  weekly: [
+    "Summarize this week's journal notes as guidance for a weekly review.",
+    "",
+    "Return a compact Markdown note with these headings:",
+    "- Patterns",
+    "- Highlights",
+    "- Difficulties",
+    "- Improvements to consider",
+    "- Reflection prompts",
+    "",
+    "Keep it useful for self-reflection. Prefer short bullets. Do not copy long passages verbatim.",
+    "",
+    "Source notes:",
+    "{{sourceNotes}}",
+  ].join("\n"),
+  monthly: [
+    "Summarize this month's review notes as guidance for a monthly review.",
+    "",
+    "Return a compact Markdown note with these headings:",
+    "- Recurring patterns",
+    "- Strong signals",
+    "- Friction points",
+    "- Improvements to consider",
+    "- Reflection prompts",
+    "",
+    "Focus on patterns across weeks, not isolated daily events.",
+    "",
+    "Source notes:",
+    "{{sourceNotes}}",
+  ].join("\n"),
+  annual: [
+    "Summarize this year's review notes as guidance for an annual review.",
+    "",
+    "Return a compact Markdown note with these headings:",
+    "- Direction",
+    "- Identity-level patterns",
+    "- Important changes",
+    "- Practices to continue or adjust",
+    "- Reflection prompts",
+    "",
+    "Focus on durable themes and direction. Do not invent facts.",
+    "",
+    "Source notes:",
+    "{{sourceNotes}}",
+  ].join("\n"),
+};
+
 const DEFAULT_SETTINGS: JournalingSystemSettings = {
   schemaVersion: SETTINGS_SCHEMA_VERSION,
   ui: {
@@ -421,6 +470,7 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     baseUrl: "http://127.0.0.1:11434",
     model: "llama3.2",
     summaryProperty: "journalAISummary",
+    prompts: { ...DEFAULT_LOCAL_AI_PROMPTS },
   },
   dailyPrompts: {
     enabled: true,
@@ -982,6 +1032,13 @@ export default class JournalingSystemPlugin extends Plugin {
     );
   }
 
+  getLocalAiPrompt(level: ReviewLevel): string {
+    return (
+      this.settings.ai.prompts[level]?.trim() ||
+      DEFAULT_LOCAL_AI_PROMPTS[level]
+    );
+  }
+
   async writeReviewAiSummary(file: TFile, summary: string): Promise<void> {
     const property = this.getAiSummaryProperty();
     if (property.length === 0) {
@@ -1043,7 +1100,11 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     const sourceText = await this.createWeeklyAiSourceText(dailySummary);
-    const summary = await requestOllamaWeeklySummary(settings, sourceText);
+    const summary = await requestOllamaReviewSummary(
+      settings,
+      sourceText,
+      this.getLocalAiPrompt("weekly")
+    );
     await this.writeReviewAiSummary(reviewFile, summary);
     return summary;
   }
@@ -3064,6 +3125,44 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           }
         });
       });
+
+    section.createEl("h3", { text: "Review AI prompts" });
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Use {{sourceNotes}} where the journal context should be inserted. If the placeholder is missing, the plugin appends the source notes at the end. Weekly is used by the current wizard; monthly and annual are ready for later review flows.",
+    });
+    for (const level of REVIEW_LEVELS) {
+      this.renderLocalAiPromptSetting(section, level);
+    }
+  }
+
+  private renderLocalAiPromptSetting(
+    containerEl: HTMLElement,
+    level: ReviewLevel
+  ): void {
+    const setting = new Setting(containerEl)
+      .setName(`${capitalize(level)} AI prompt`)
+      .setDesc(`Prompt template for ${level} AI review guidance.`);
+    setting.addTextArea((textarea) => {
+      textarea
+        .setValue(this.plugin.settings.ai.prompts[level])
+        .onChange(async (value) => {
+          this.plugin.settings.ai.prompts[level] =
+            normalizeLocalAiPrompt(value, DEFAULT_LOCAL_AI_PROMPTS[level]);
+          await this.plugin.saveSettings();
+        });
+      textarea.inputEl.addClass("journaling-system-ai-prompt-textarea");
+    });
+    setting.addButton((button) => {
+      button
+        .setButtonText("Reset")
+        .setTooltip("Reset to default prompt")
+        .onClick(async () => {
+          this.plugin.settings.ai.prompts[level] = DEFAULT_LOCAL_AI_PROMPTS[level];
+          await this.plugin.saveSettings();
+          this.display();
+        });
+    });
   }
 
   private displayAppearanceSettings(containerEl: HTMLElement): void {
@@ -4225,7 +4324,22 @@ function normalizeLocalAiSettings(value: unknown): LocalAiSettings {
     baseUrl: normalizeLocalAiBaseUrl(raw.baseUrl),
     model: normalizeLocalAiModel(raw.model),
     summaryProperty: normalizeAiSummaryProperty(raw.summaryProperty),
+    prompts: normalizeLocalAiPrompts(raw.prompts),
   };
+}
+
+function normalizeLocalAiPrompts(value: unknown): Record<ReviewLevel, string> {
+  const raw = isRecord(value) ? value : {};
+  return {
+    weekly: normalizeLocalAiPrompt(raw.weekly, DEFAULT_LOCAL_AI_PROMPTS.weekly),
+    monthly: normalizeLocalAiPrompt(raw.monthly, DEFAULT_LOCAL_AI_PROMPTS.monthly),
+    annual: normalizeLocalAiPrompt(raw.annual, DEFAULT_LOCAL_AI_PROMPTS.annual),
+  };
+}
+
+function normalizeLocalAiPrompt(value: unknown, fallback: string): string {
+  const prompt = String(value ?? "").trim();
+  return prompt.length > 0 ? prompt : fallback;
 }
 
 function normalizeLocalAiBaseUrl(value: unknown): string {
@@ -5009,9 +5123,10 @@ function normalizeReviewContextHeight(value: unknown): number {
   return clamp(Number.isFinite(parsed) ? Math.round(parsed) : 360, 180, 560);
 }
 
-async function requestOllamaWeeklySummary(
+async function requestOllamaReviewSummary(
   settings: LocalAiSettings,
-  sourceText: string
+  sourceText: string,
+  promptTemplate: string
 ): Promise<string> {
   const response = await requestUrl({
     url: `${settings.baseUrl}/api/chat`,
@@ -5028,7 +5143,7 @@ async function requestOllamaWeeklySummary(
         },
         {
           role: "user",
-          content: buildWeeklyAiPrompt(sourceText),
+          content: buildReviewAiPrompt(promptTemplate, sourceText),
         },
       ],
       options: {
@@ -5050,22 +5165,13 @@ async function requestOllamaWeeklySummary(
   return content.trim();
 }
 
-function buildWeeklyAiPrompt(sourceText: string): string {
-  return [
-    "Summarize this week's journal notes as guidance for a weekly review.",
-    "",
-    "Return a compact Markdown note with these headings:",
-    "- Patterns",
-    "- Highlights",
-    "- Difficulties",
-    "- Improvements to consider",
-    "- Reflection prompts",
-    "",
-    "Keep it useful for self-reflection. Prefer short bullets. Do not copy long passages verbatim.",
-    "",
-    "Source notes:",
-    sourceText,
-  ].join("\n");
+function buildReviewAiPrompt(promptTemplate: string, sourceText: string): string {
+  const prompt = promptTemplate.trim();
+  if (prompt.includes("{{sourceNotes}}")) {
+    return prompt.split("{{sourceNotes}}").join(sourceText);
+  }
+
+  return [prompt, "", "Source notes:", sourceText].join("\n");
 }
 
 function getOllamaModelNames(value: unknown): string[] {
