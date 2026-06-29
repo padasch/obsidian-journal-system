@@ -123,6 +123,76 @@ Review rollup model:
 - Generated review notes report count, mean, min, and max for enabled daily
   number properties across the review period.
 
+## Emerging Review Model
+
+The review layer should probably simplify around one editable summary rather than
+several overlapping reflection properties.
+
+Proposed review properties:
+
+- `journalSummary`: editable text summary for weekly, monthly, and annual review
+  notes. It can start from local AI output, but the user edits it directly until
+  it becomes their own review text.
+- `journalSummaryAI`: boolean flag indicating that the current summary was
+  initially generated from local AI. This keeps provenance visible without
+  splitting the actual summary into separate AI/self fields.
+- `journalLong`: optional boolean for longer freeform review writing under the
+  review body heading, following the same pattern as daily long journal entries.
+- `journalTopics`: optional multiselect/wiki-link index for connecting days,
+  weeks, months, or years to recurring vault concepts such as `[[Parenting]]`.
+
+Implementation outline:
+
+- Replace the wizard's read-only AI summary panel with an editable summary field
+  bound to `journalSummary`.
+- When the user generates local AI guidance, insert it into the editable summary
+  field and set `journalSummaryAI` to `true`.
+- If the user writes a summary without generating AI, keep `journalSummaryAI` as
+  `false`.
+- Update review Bases to prioritize `journalSummary`, `journalSummaryAI`,
+  `journalTopics`, numeric summaries, and long-entry embeds instead of many
+  overlapping reflection properties.
+- Preserve migration compatibility for existing fields such as
+  `journalHighlights`, `journalDifficulties`, `journalImprovements`,
+  `journalLife`, `journalWork`, and `journalThemes`, but stop making them the
+  default review workflow.
+
+Local AI improvements:
+
+- Obsidian plugins cannot reliably scan the whole operating system for installed
+  Ollama binaries. The practical local-only approach is endpoint discovery:
+  probe a short allowlist of localhost URLs such as `http://127.0.0.1:11434`,
+  `http://localhost:11434`, and `[::1]` with `/api/tags`, then use the first
+  responsive endpoint.
+- Keep manual URL configuration as the fallback for unusual local Ollama setups.
+- Add configurable review aspects, one per line, and inject them into weekly,
+  monthly, and annual prompt templates with an `{{aspects}}` placeholder.
+- Good default aspects: life and wellbeing, family and relationships, parenting,
+  work and projects, energy and health, stuck points, and signals to carry
+  forward.
+
+Future goal-review layer:
+
+- Add quarterly goal notes or properties later, for example `journalType:
+  quarterly`, `journalGoal`, `journalGoalStatus`, `journalGoalArea`, and
+  `journalGoalDue`.
+- Review notes could show active goals for the period in a Base, then ask the
+  local AI summary to compare journal evidence with goal progress.
+- Keep goal tracking separate from the low-friction daily prompt so daily
+  journaling does not become project management.
+
+Handwritten journal attachments:
+
+- Add a dynamic `journalPicture` boolean to indicate whether a note contains
+  linked or embedded handwritten-journal assets.
+- On daily/review modal open and review-note refresh, scan note links/embeds for
+  common attachment types such as `png`, `jpg`, `jpeg`, `webp`, `gif`, `heic`,
+  `pdf`, `tif`, and `tiff`, then update `journalPicture`.
+- Add a plain checklist prompt for notes with pictures, such as "Review attached
+  handwritten journal images".
+- Do not attempt OCR initially. A later local-only OCR/vision step could be added
+  if it can run without cloud services.
+
 ## Release Workflow
 
 Before creating or pushing releases, authenticate GitHub CLI:
