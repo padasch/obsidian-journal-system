@@ -4,13 +4,17 @@
   letter-spacing: 0;
 }
 
+.journaling-system-settings {
+  overflow: visible;
+}
+
 .journaling-system-settings-section,
 .journaling-system-system-note {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
   margin: 14px 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .journaling-system-settings-section-summary,
