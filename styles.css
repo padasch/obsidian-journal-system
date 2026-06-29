@@ -492,6 +492,39 @@
   margin-top: 18px;
 }
 
+.journaling-system-topic-picker-actions {
+  margin-bottom: 6px;
+}
+
+.journaling-system-topic-picker-search {
+  width: 100%;
+}
+
+.journaling-system-topic-picker-list {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin-top: 8px;
+  max-height: 180px;
+  min-height: 72px;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.journaling-system-topic-picker-item {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.journaling-system-topic-picker-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.journaling-system-topic-picker-item span {
+  font-size: var(--journaling-system-modal-font-size);
+}
+
 @media (max-width: 700px) {
   .modal.journaling-system-modal-shell {
     align-self: flex-start;

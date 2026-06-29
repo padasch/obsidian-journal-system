@@ -2743,21 +2743,17 @@ class ReviewWizardModal extends Modal {
       this.values.get(property.id) ?? this.initialFrontmatter[property.property]
     );
 
+    if (
+      definition.type === "multiselect" &&
+      this.isTopicProperty(property.property, property.label)
+    ) {
+      const topicInput = this.currentInput as ReviewTopicsInput | null;
+      if (topicInput?.addValues) {
+        this.renderReviewTopicPickerButton(fieldEl, property.property, topicInput);
+      }
+    }
+
     const buttonRow = this.contentEl.createDiv({ cls: "journaling-system-modal-actions" });
-    new ButtonComponent(buttonRow)
-      .setButtonText("Back")
-      .setDisabled(this.stepIndex === 0)
-      .onClick(() => {
-        this.saveCurrentStepValue();
-        this.stepIndex = Math.max(0, this.stepIndex - 1);
-        this.renderStep();
-      });
-    new ButtonComponent(buttonRow)
-      .setButtonText("Skip")
-      .onClick(() => {
-        this.stepIndex += 1;
-        this.renderStep();
-      });
     new ButtonComponent(buttonRow)
       .setButtonText(this.stepIndex === this.properties.length - 1 ? "Finish" : "Next")
       .setCta()
@@ -2775,6 +2771,34 @@ class ReviewWizardModal extends Modal {
       .setButtonText("Cancel")
       .onClick(() => {
         this.close();
+      });
+  }
+
+  private isTopicProperty(propertyName: string, propertyLabel: string): boolean {
+    const value = `${propertyName} ${propertyLabel}`.toLowerCase();
+    return /\b(topic|topics|theme|themes)\b/.test(value);
+  }
+
+  private renderReviewTopicPickerButton(
+    fieldEl: HTMLElement,
+    propertyName: string,
+    topicInput: ReviewTopicsInput
+  ): void {
+    const actionRow = fieldEl.createDiv({
+      cls: "journaling-system-topic-picker-actions",
+    });
+    new ButtonComponent(actionRow)
+      .setButtonText("Pick existing topics")
+      .onClick(() => {
+        new ReviewTopicsPickerModal(
+          this.app,
+          propertyName,
+          this.plugin.collectExistingValues(propertyName),
+          topicInput.getValues(),
+          (selectedValues) => {
+            topicInput.addValues(selectedValues);
+          }
+        ).open();
       });
   }
 
@@ -3085,7 +3109,14 @@ class JournalingPromptModal extends Modal {
 
 interface JournalFieldInput {
   getValue(): string | number | string[] | boolean;
+  getValues?(): string[];
+  addValues?(values: string[]): void;
 }
+
+type ReviewTopicsInput = JournalFieldInput & {
+  getValues(): string[];
+  addValues(values: string[]): void;
+};
 
 function createJournalInput(
   app: App,
@@ -3163,6 +3194,8 @@ function createJournalInput(
   );
   return {
     getValue: () => multiInput.getValues(),
+    getValues: () => multiInput.getValues(),
+    addValues: (values: string[]) => multiInput.addValues(values),
   };
 }
 
@@ -3196,6 +3229,15 @@ class MultiSelectPropertyInput {
     return mergeStringArrays([], parseMultiSelectEntry(this.textareaEl.value));
   }
 
+  addValues(values: string[]): void {
+    this.textareaEl.value = mergeStringArrays(
+      parseMultiSelectEntry(this.textareaEl.value),
+      values
+    ).join("\n");
+    this.renderSuggestions();
+    this.textareaEl.focus();
+  }
+
   private renderSuggestions(): void {
     this.suggestionsEl.empty();
     const query = getCurrentLine(this.textareaEl).trim();
@@ -3227,6 +3269,139 @@ class MultiSelectPropertyInput {
 
   private currentValues(): string[] {
     return parseMultiSelectEntry(this.textareaEl.value);
+  }
+}
+
+class ReviewTopicsPickerModal extends Modal {
+  private readonly selectedValues = new Map<string, string>();
+  private readonly availableValues: string[];
+  private searchInput: HTMLInputElement | null = null;
+  private listContainer: HTMLElement | null = null;
+  private insertButton: HTMLButtonElement | null = null;
+
+  constructor(
+    app: App,
+    private readonly propertyName: string,
+    availableValues: string[],
+    currentValues: string[],
+    private readonly onSelectValues: (values: string[]) => void | Promise<void>
+  ) {
+    super(app);
+    this.availableValues = dedupeProperties(
+      availableValues
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+    );
+    for (const value of currentValues) {
+      const normalized = value.trim();
+      if (normalized.length > 0) {
+        this.selectedValues.set(normalized.toLowerCase(), normalized);
+      }
+    }
+
+    this.setTitle(`Select existing ${this.propertyName} values`);
+  }
+
+  onOpen(): void {
+    this.contentEl.empty();
+    this.contentEl.addClass("journaling-system-topic-picker-modal");
+
+    this.contentEl.createEl("div", {
+      text: "Pick existing values with fuzzy search, then insert them into the current field.",
+      cls: "journaling-system-field-hint",
+    });
+
+    const searchRow = this.contentEl.createDiv({
+      cls: "journaling-system-topic-picker-row",
+    });
+    this.searchInput = searchRow.createEl("input", {
+      cls: "journaling-system-input journaling-system-topic-picker-search",
+      value: "",
+    });
+    this.searchInput.placeholder = "Search existing entries...";
+    this.searchInput.addEventListener("input", () => this.renderList());
+
+    this.listContainer = this.contentEl.createDiv({
+      cls: "journaling-system-topic-picker-list",
+    });
+
+    const actions = this.contentEl.createDiv({ cls: "journaling-system-modal-actions journaling-system-topic-picker-actions" });
+    const insertAction = new ButtonComponent(actions)
+      .setButtonText("Insert selected")
+      .setCta()
+      .setDisabled(this.selectedValues.size === 0)
+      .onClick(async () => {
+        await this.onSelectValues(Array.from(this.selectedValues.values()));
+        this.close();
+      });
+    this.insertButton = insertAction.buttonEl;
+
+    new ButtonComponent(actions)
+      .setButtonText("Cancel")
+      .onClick(() => {
+        this.close();
+      });
+
+    this.renderList();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+
+  private renderList(): void {
+    if (!this.listContainer) {
+      return;
+    }
+
+    const query = this.searchInput?.value.trim() ?? "";
+    this.listContainer.empty();
+
+    const availableOptions = this.availableValues
+      .map((value) => ({
+        value,
+        score: query.length === 0 ? 0 : fuzzyScore(value, query),
+      }))
+      .filter(({ score }) => query.length === 0 || score > 0)
+      .sort((a, b) =>
+        query.length === 0
+          ? a.value.localeCompare(b.value)
+          : b.score - a.score || a.value.localeCompare(b.value)
+      );
+
+    if (availableOptions.length === 0) {
+      this.listContainer.createDiv({
+        text: query.length === 0
+          ? "No matching existing values found."
+          : "No results. Type more or add a new value directly in the field.",
+        cls: "journaling-system-field-hint",
+      });
+      return;
+    }
+
+    for (const { value } of availableOptions.slice(0, 30)) {
+      const row = this.listContainer.createDiv({
+        cls: "journaling-system-topic-picker-item",
+      });
+      const checkbox = row.createEl("input", { type: "checkbox" });
+      const normalized = value.toLowerCase();
+      checkbox.checked = this.selectedValues.has(normalized);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          this.selectedValues.set(normalized, value);
+        } else {
+          this.selectedValues.delete(normalized);
+        }
+        this.updateInsertState();
+      });
+      row.createEl("span", { text: value });
+    }
+  }
+
+  private updateInsertState(): void {
+    if (this.insertButton) {
+      this.insertButton.disabled = this.selectedValues.size === 0;
+    }
   }
 }
 
