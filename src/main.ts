@@ -3670,6 +3670,31 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     this.displayAppearanceSettings(containerEl);
   }
 
+  private refreshSettingsView(): void {
+    const container = this.containerEl;
+    const scrollTop = container.scrollTop;
+    const sectionOpenStates = Array.from(
+      container.querySelectorAll<HTMLDetailsElement>(
+        "details.journaling-system-settings-section"
+      )
+    ).map((details) => details.open);
+
+    this.display();
+
+    requestAnimationFrame(() => {
+      container.scrollTop = scrollTop;
+      const sections = container.querySelectorAll<HTMLDetailsElement>(
+        "details.journaling-system-settings-section"
+      );
+      sections.forEach((details, index) => {
+        const wasOpen = sectionOpenStates[index];
+        if (typeof wasOpen === "boolean") {
+          details.open = wasOpen;
+        }
+      });
+    });
+  }
+
   private displaySystemIdea(containerEl: HTMLElement): void {
     const details = containerEl.createEl("details", {
       cls: "journaling-system-system-note",
@@ -4008,7 +4033,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           weekdays.has(day)
         );
         await this.plugin.saveSettings();
-        this.display();
+        this.refreshSettingsView();
       });
     }
 
@@ -4316,7 +4341,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         button.setButtonText("Find local Ollama").onClick(async () => {
           try {
             new Notice(await this.plugin.findAndUseLocalOllama());
-            this.display();
+            this.refreshSettingsView();
           } catch (error) {
             new Notice(
               error instanceof Error
@@ -4365,7 +4390,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         onReset: async () => {
           this.plugin.settings.ai.aspects = [...DEFAULT_LOCAL_AI_ASPECTS];
           await this.plugin.saveSettings();
-          this.display();
+          this.refreshSettingsView();
         },
       }
     );
@@ -4403,7 +4428,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         onReset: async () => {
           this.plugin.settings.ai.prompts[level] = DEFAULT_LOCAL_AI_PROMPTS[level];
           await this.plugin.saveSettings();
-          this.display();
+          this.refreshSettingsView();
         },
       }
     );
@@ -4662,7 +4687,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
             role: "custom",
           });
           await this.plugin.saveSettings();
-          this.display();
+          this.refreshSettingsView();
         });
     });
 
@@ -4693,7 +4718,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
             levels: ["weekly", "monthly", "annual"],
           });
           await this.plugin.saveSettings();
-          this.display();
+          this.refreshSettingsView();
         });
     });
   }
@@ -4766,7 +4791,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     type.addEventListener("change", async () => {
       property.type = type.value as JournalPropertyType;
       await this.plugin.saveSettings();
-      this.display();
+      this.refreshSettingsView();
     });
 
     if (property.type === "number") {
@@ -4807,7 +4832,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         (definition) => definition.id !== property.id
       );
       await this.plugin.saveSettings();
-      this.display();
+      this.refreshSettingsView();
     });
   }
 
@@ -4973,7 +4998,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           (definition) => definition.id !== property.id
         );
       await this.plugin.saveSettings();
-      this.display();
+      this.refreshSettingsView();
     });
   }
 
@@ -5189,7 +5214,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
             new FolderSuggestModal(this.app, async (folder) => {
               const path = folder.isRoot() ? "" : folder.path;
               await onChange(path);
-              this.display();
+              this.refreshSettingsView();
             }).open();
           });
       });
