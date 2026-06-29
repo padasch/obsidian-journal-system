@@ -26,19 +26,21 @@ long-form journal heading.
   generated review notes.
 - Add a one-row review-fields Base to each review note so review properties can
   be edited in the note body instead of only through YAML.
-- Try a weekly review wizard that shows concise daily context, steps through
-  weekly review properties, then opens the review note for further writing.
+- Try a weekly review wizard that shows concise daily context, offers an editable
+  summary, can generate a local AI draft, steps through enabled review
+  properties, then opens the review note for further writing.
 
 ## Review philosophy
 
-Daily notes should stay fast and raw. Higher-level review properties are meant to
-be extracted from the daily signal rather than forced into every daily entry.
+Daily notes should stay fast and raw. Higher-level reviews should condense the
+daily signal into a small number of readable fields rather than forcing many
+overlapping categories into every review.
 
-`journalThemes` is a review-level multiselect for recurring patterns you want to
-compare over time, not a replacement for written reflection. Use short labels such
-as `sleep/recovery`, `context switching`, or `creative momentum` when a pattern
-keeps appearing. Write the nuance in the review reflection, then use Themes as a
-small, queryable index for Bases.
+The default review center is `journalSummary`: one editable summary for the
+review period. If the weekly wizard starts that summary from local AI, it sets
+`journalSummaryAI` to `true` while still letting the user edit the text directly.
+`journalTopics` is the lightweight multiselect/wiki-link index for connecting
+days, weeks, months, or years to recurring vault concepts such as `[[Parenting]]`.
 
 ## Current settings
 
@@ -47,15 +49,15 @@ The settings tab is organized into:
 - Basic settings for shared UI, the review note folder, global review content
   switches, and review-workspace headings.
 - Property settings shared across all notes, including automatic properties,
-  daily modal properties, and review properties such as `journalHighlights`,
-  `journalDifficulties`, `journalImprovements`, `journalLife`, `journalWork`, and
-  `journalThemes`.
+  daily modal properties, and review properties such as `journalSummary`,
+  `journalSummaryAI`, `journalTopics`, `journalLong`, and `journalPicture`.
 - Bases settings shared across all notes, including inline Bases, generated Base
   columns, per-column Base widths, display names, and row height.
 - Separate Daily, Weekly, Monthly, and Annual settings sections for prompts,
   note formats, checklist prompts, and per-level long-entry embed behavior.
 - Local AI settings for optional Ollama-backed weekly summary guidance, disabled
-  by default, with editable weekly/monthly/annual prompt templates.
+  by default, with endpoint discovery, configurable review aspects, and editable
+  weekly/monthly/annual prompt templates.
 - Appearance settings for desktop modal text size, width, height, and weekly
   review context height.
 
@@ -71,12 +73,13 @@ scannable as options grow.
   entries can be embedded in reviews.
 - Automatic properties are maintained by the plugin and are mainly for filtering
   and linking notes across time. They provide stable keys for daily, weekly,
-  monthly, and annual Bases.
+  monthly, and annual Bases. `journalPicture` is maintained from linked or
+  embedded image/PDF attachments.
 - Daily properties define the prompt fields. These should stay lightweight, since
   daily notes are meant to capture raw signal quickly.
-- Review properties define the condensation fields. These are where highlights,
-  difficulties, improvements, life/work reflections, and themes emerge from daily
-  writing.
+- Review properties define the condensation fields. The default model keeps this
+  simple: `journalSummary` carries the review text, `journalSummaryAI` records
+  whether it started from AI, and `journalTopics` indexes recurring vault topics.
 - Bases settings control generated Obsidian Base blocks, including the editable
   Review Fields Base and source-note Bases. Select which properties should be
   visible and optionally set column widths for fields that need more room.
@@ -86,9 +89,11 @@ scannable as options grow.
   schedule, review note name format, checklist prompts, and whether that level
   embeds daily long entries.
 - Local AI settings connect to Ollama on localhost only. The plugin can check the
-  server, explicitly ask Ollama to download the configured model, and save weekly
-  guidance to `journalAISummary`. AI prompt templates can be edited per review
-  level and reset to their defaults.
+  server, probe common local Ollama endpoints, explicitly ask Ollama to download
+  the configured model, and insert weekly guidance into `journalSummary`.
+  `journalSummaryAI` is set when the summary started from AI. AI prompt templates
+  can be edited per review level, can use `{{sourceNotes}}` and `{{aspects}}`,
+  and can be reset to their defaults.
 - Appearance settings control desktop modal sizing. Mobile keeps the compact
   top-half modal layout.
 - Default review note name formats are `YYYY - [Week] WW`, `YYYY-MM MMMM`, and
@@ -118,7 +123,12 @@ daily note has no quick entry yet. The command `Open daily journal prompt` remai
 manual and always opens the modal.
 
 Daily and review notes receive `journalType` frontmatter. Daily notes also receive
-period keys such as `journalWeek`, `journalMonth`, and `journalYear`.
+period keys such as `journalWeek`, `journalMonth`, and `journalYear`. Notes also
+receive `journalPicture` when they link or embed common image/PDF attachment
+types such as PNG, JPG, JPEG, WEBP, GIF, HEIC, PDF, TIF, or TIFF. The flag is
+refreshed when the daily prompt opens and when review notes are created/refreshed.
+New review checklists include a prompt to review attached handwritten journal
+images or PDFs when matching source notes contain picture attachments.
 
 Generated reviews include a Review Fields Base filtered to the current note, so
 review properties can be edited directly from the review note. Generated weekly
@@ -134,23 +144,26 @@ and reports count, mean, min, and max for the review period. Custom daily number
 properties are included automatically.
 
 The weekly review wizard is a trial flow. It creates or opens the weekly review,
-shows concise daily context, steps through the enabled weekly review properties,
-saves the entered properties, and then opens the note at the reflection heading.
+shows concise daily context, lets the user write or edit `journalSummary`, steps
+through the enabled weekly review properties, saves the entered properties, and
+then opens the note at the reflection heading.
 When local AI review assistance is enabled, the wizard can generate a private
 Ollama-backed weekly summary from the matching daily quick entries and long
-journal sections. The generated text is saved to the configured AI summary
-property, default `journalAISummary`, and displayed in the wizard as guidance.
-Local AI prompt templates support `{{sourceNotes}}` as the insertion point for
-review context; if omitted, source notes are appended automatically.
+journal sections. The generated text is inserted into the editable summary
+textarea, where it can be changed before saving. The summary is saved to
+`journalSummary` by default; `journalSummaryAI` is set to `true` when the text
+started from AI. Local AI prompt templates support `{{sourceNotes}}` as the
+insertion point for review context and `{{aspects}}` for the configured aspect
+list; if omitted, the missing sections are appended automatically.
 
 Review Base columns can be selected separately for daily-source Bases and
 review-source Bases, with an optional column-width field for each property. Default
-widths are set for `journalShort`, `journalLocation`, `journalHighlights`,
-`journalDifficulties`, `journalImprovements`, `journalLife`, `journalWork`, and
-`journalThemes`. Generated Bases also set display names for configured columns, so
-properties such as `journalWeek` and `journalDifficulties` render as `Week` and
-`Difficulties`. The default setting is shown as `Extra tall` and generated Bases
-write it as `rowHeight: extra`.
+widths are set for fields such as `journalShort`, `journalSummary`,
+`journalLocation`, `journalTopics`, `journalLong`, and `journalPicture`.
+Generated Bases also set display names for configured columns, so properties such
+as `journalWeek` and `journalSummary` render as `Week` and `Summary`. The default
+setting is shown as `Extra tall` and generated Bases write it as
+`rowHeight: extra`.
 
 When long-entry embeds are enabled for a review level, review notes scan matching
 daily notes and embed `## Journal` sections that contain actual text. The

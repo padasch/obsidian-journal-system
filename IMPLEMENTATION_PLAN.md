@@ -78,11 +78,10 @@ Daily capture fields:
 
 - `journalShort`: quick entry for dropping thoughts
 - `journalLong`: boolean/manual flag indicating long-form prose exists
-- `journalWins`: multiple entries
-- `journalFails`: multiple entries
-- `journalTopics`: multi-select/list property
 - `journalLocation`: location text
 - `journalMood`: number from 1 to 10
+- `journalPicture`: automatic boolean indicating linked or embedded image/PDF
+  attachments
 - `journalDate`: automatic date
 - `journalTime`: automatic time
 - `journalWeekday`: automatic weekday
@@ -123,12 +122,12 @@ Review rollup model:
 - Generated review notes report count, mean, min, and max for enabled daily
   number properties across the review period.
 
-## Emerging Review Model
+## Review Summary Model
 
-The review layer should probably simplify around one editable summary rather than
-several overlapping reflection properties.
+The review layer simplifies around one editable summary rather than several
+overlapping reflection properties.
 
-Proposed review properties:
+Default review properties:
 
 - `journalSummary`: editable text summary for weekly, monthly, and annual review
   notes. It can start from local AI output, but the user edits it directly until
@@ -143,13 +142,13 @@ Proposed review properties:
 
 Implementation outline:
 
-- Replace the wizard's read-only AI summary panel with an editable summary field
+- Replaced the wizard's read-only AI summary panel with an editable summary field
   bound to `journalSummary`.
 - When the user generates local AI guidance, insert it into the editable summary
   field and set `journalSummaryAI` to `true`.
 - If the user writes a summary without generating AI, keep `journalSummaryAI` as
   `false`.
-- Update review Bases to prioritize `journalSummary`, `journalSummaryAI`,
+- Updated review Bases to prioritize `journalSummary`, `journalSummaryAI`,
   `journalTopics`, numeric summaries, and long-entry embeds instead of many
   overlapping reflection properties.
 - Preserve migration compatibility for existing fields such as
@@ -163,9 +162,10 @@ Local AI improvements:
   Ollama binaries. The practical local-only approach is endpoint discovery:
   probe a short allowlist of localhost URLs such as `http://127.0.0.1:11434`,
   `http://localhost:11434`, and `[::1]` with `/api/tags`, then use the first
-  responsive endpoint.
+  responsive endpoint. This is now implemented through status checks, generation,
+  model download, and the settings button.
 - Keep manual URL configuration as the fallback for unusual local Ollama setups.
-- Add configurable review aspects, one per line, and inject them into weekly,
+- Added configurable review aspects, one per line, and inject them into weekly,
   monthly, and annual prompt templates with an `{{aspects}}` placeholder.
 - Good default aspects: life and wellbeing, family and relationships, parenting,
   work and projects, energy and health, stuck points, and signals to carry
@@ -183,12 +183,12 @@ Future goal-review layer:
 
 Handwritten journal attachments:
 
-- Add a dynamic `journalPicture` boolean to indicate whether a note contains
+- Added a dynamic `journalPicture` boolean to indicate whether a note contains
   linked or embedded handwritten-journal assets.
 - On daily/review modal open and review-note refresh, scan note links/embeds for
   common attachment types such as `png`, `jpg`, `jpeg`, `webp`, `gif`, `heic`,
   `pdf`, `tif`, and `tiff`, then update `journalPicture`.
-- Add a plain checklist prompt for notes with pictures, such as "Review attached
+- Adds a plain checklist prompt for notes with pictures, such as "Review attached
   handwritten journal images".
 - Do not attempt OCR initially. A later local-only OCR/vision step could be added
   if it can run without cloud services.

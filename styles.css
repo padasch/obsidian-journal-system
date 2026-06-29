@@ -379,9 +379,16 @@
   white-space: pre-wrap;
 }
 
+.journaling-system-review-summary-textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+
 .journaling-system-ai-summary-actions {
   display: flex;
+  gap: 8px;
   justify-content: flex-end;
+  margin-top: 10px;
 }
 
 .journaling-system-checkbox-row {
