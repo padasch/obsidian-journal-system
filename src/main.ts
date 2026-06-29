@@ -5254,7 +5254,7 @@ function createSettingsSection(containerEl: HTMLElement, title: string): HTMLEle
   const section = containerEl.createEl("details", {
     cls: "journaling-system-settings-section",
   });
-  section.open = true;
+  section.open = false;
   section.createEl("summary", {
     text: title,
     cls: "journaling-system-settings-section-summary",
