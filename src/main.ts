@@ -2516,6 +2516,10 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     for (const root of normalizedRoots) {
+      if (root.length === 0) {
+        return this.app.vault.getMarkdownFiles();
+      }
+
       const folder = this.app.vault.getFolderByPath(root);
       if (!folder) {
         continue;
@@ -2525,7 +2529,7 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     if (rootFiles.length === 0) {
-      return this.app.vault.getMarkdownFiles();
+      return [];
     }
 
     return rootFiles;
@@ -2876,12 +2880,7 @@ class ReviewWizardModal extends Modal {
   }
 
   private isTopicProperty(property: ReviewPropertyDefinition): boolean {
-    return (
-      property.isTopicField === true ||
-      /\b(topic|topics|theme|themes)\b/.test(
-        `${property.property} ${property.label}`.toLowerCase()
-      )
-    );
+    return property.isTopicField === true;
   }
 
   private renderReviewTopicPickerButton(
@@ -2889,11 +2888,12 @@ class ReviewWizardModal extends Modal {
     property: ReviewPropertyDefinition,
     topicInput: ReviewTopicsInput
   ): void {
+    const topicName = property.label.trim().length > 0 ? property.label : property.property;
     const actionRow = fieldEl.createDiv({
       cls: "journaling-system-topic-picker-actions",
     });
     new ButtonComponent(actionRow)
-      .setButtonText("Pick existing topics")
+      .setButtonText(`Pick existing ${topicName}`)
       .onClick(() => {
         new ReviewTopicsPickerModal(
           this.app,
