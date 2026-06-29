@@ -4373,7 +4373,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     section.createEl("h3", { text: "Review AI prompts" });
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "Use {{sourceNotes}} where the journal context should be inserted and {{aspects}} where the aspect list should appear. If placeholders are missing, the plugin appends the missing context automatically.",
+      text: "Prompt placeholders: {{sourceNotes}} inserts matching source note context, {{aspects}} inserts review aspects, {{language}} inserts the configured summary language. If {{sourceNotes}}, {{aspects}}, or {{language}} are missing, their values are appended automatically.",
     });
     for (const level of REVIEW_LEVELS) {
       this.renderLocalAiPromptSetting(section, level);

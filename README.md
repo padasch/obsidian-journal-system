@@ -92,10 +92,12 @@ scannable as options grow.
   server, probe common local Ollama endpoints, explicitly ask Ollama to download
   the configured model, and insert weekly guidance into `journalSummary`.
   `journalSummaryAI` is set when the summary started from AI. AI prompt templates
-  can be edited per review level, can use `{{sourceNotes}}`, `{{aspects}}`,
-  and `{{language}}` placeholders, and can be reset to their defaults. A dedicated
-  summary language setting controls generated output language and defaults to
-  English.
+  can be edited per review level and use these placeholders:
+  - `{{sourceNotes}}`: inserts the summarized daily/review source context.
+  - `{{aspects}}`: inserts the configured review aspects.
+  - `{{language}}`: inserts the configured summary language.
+  Templates can be reset to defaults. A dedicated summary language setting
+  controls generated output language and defaults to English.
 - Appearance settings control desktop modal sizing. Mobile keeps the compact
   top-half modal layout.
 - Default review note name formats are `YYYY - [Week] WW`, `YYYY-MM MMMM`, and
@@ -155,11 +157,9 @@ Ollama-backed weekly summary from the matching daily quick entries and long
 journal sections. The generated text is inserted into the editable summary
 textarea, where it can be changed before saving. The summary is saved to
 `journalSummary` by default; `journalSummaryAI` is set to `true` when the text
-started from AI. Local AI prompt templates support `{{sourceNotes}}` as the
-insertion point for review context and `{{aspects}}` for the configured aspect
-list; if omitted, the missing sections are appended automatically. You can set the
-AI summary language in settings so generated text is produced in your preferred
-language.
+started from AI. Local AI prompt templates support three placeholders:
+`{{sourceNotes}}`, `{{aspects}}`, and `{{language}}`. If a placeholder is omitted,
+the missing section is appended automatically at generation time.
 
 Use `Choose review period` to open the current period or either of the previous
 two weeks, months, or years. Weekly period rows can also start the weekly review
