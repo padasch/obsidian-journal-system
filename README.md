@@ -22,6 +22,8 @@ long-form journal heading.
 - Prompt for daily, weekly, monthly, and annual reviews on configurable schedules.
 - Generate review workspaces with plain bullet checklist prompts, source Bases, and fillable
   review properties while preserving user-written reflection.
+- Report count, mean, min, and max for enabled daily number properties inside
+  generated review notes.
 - Add a one-row review-fields Base to each review note so review properties can
   be edited in the note body instead of only through YAML.
 - Try a weekly review wizard that shows concise daily context, steps through
@@ -65,8 +67,8 @@ scannable as options grow.
 
 - Basic settings affect shared generated review structure. Use them to set the
   review folder, the heading names used in generated notes, whether review
-  checklists are created, and whether long daily journal entries can be embedded
-  in reviews.
+  checklists and numeric summaries are created, and whether long daily journal
+  entries can be embedded in reviews.
 - Automatic properties are maintained by the plugin and are mainly for filtering
   and linking notes across time. They provide stable keys for daily, weekly,
   monthly, and annual Bases.
@@ -125,6 +127,11 @@ default. Generated monthly reviews use weekly reviews as their primary Base
 source. Generated annual reviews use monthly reviews as their primary Base source.
 Monthly and annual reviews can optionally include an additional daily note Base
 for deeper browsing.
+
+Generated review notes also include a Numerical summary section by default. It
+scans matching daily notes for enabled number properties, such as `journalMood`,
+and reports count, mean, min, and max for the review period. Custom daily number
+properties are included automatically.
 
 The weekly review wizard is a trial flow. It creates or opens the weekly review,
 shows concise daily context, steps through the enabled weekly review properties,

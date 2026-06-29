@@ -138,6 +138,7 @@ interface JournalingSystemSettings {
     includeManagedRollupBlock: boolean;
     includeInlineBases: boolean;
     includeLongEntryEmbeds: boolean;
+    includeNumericSummary: boolean;
     includeReviewChecklist: boolean;
     includeDailyBaseOnHigherReviews: boolean;
     longEntryEmbedLevels: Record<ReviewLevel, boolean>;
@@ -146,6 +147,7 @@ interface JournalingSystemSettings {
     sourceNotesHeading: string;
     checklistHeading: string;
     longEntriesHeading: string;
+    numericSummaryHeading: string;
     baseProperties: string[];
     reviewBaseProperties: string[];
     baseRowHeight: BaseRowHeight;
@@ -174,7 +176,15 @@ interface DailyReviewSummaryItem {
   hasLongEntry: boolean;
 }
 
-const SETTINGS_SCHEMA_VERSION = 10;
+interface NumericPropertySummary {
+  label: string;
+  count: number;
+  mean: number;
+  min: number;
+  max: number;
+}
+
+const SETTINGS_SCHEMA_VERSION = 11;
 const moment = obsidianMoment as unknown as () => Moment;
 
 const WEEKDAYS: Weekday[] = [
@@ -526,6 +536,7 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     includeManagedRollupBlock: false,
     includeInlineBases: true,
     includeLongEntryEmbeds: true,
+    includeNumericSummary: true,
     includeReviewChecklist: true,
     includeDailyBaseOnHigherReviews: false,
     longEntryEmbedLevels: {
@@ -538,6 +549,7 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     sourceNotesHeading: "Source Notes",
     checklistHeading: "Review Checklist",
     longEntriesHeading: "Long entries",
+    numericSummaryHeading: "Numerical summary",
     baseProperties: [...DEFAULT_REVIEW_BASE_PROPERTIES],
     reviewBaseProperties: [...DEFAULT_REVIEW_SOURCE_BASE_PROPERTIES],
     baseRowHeight: "extra",
@@ -879,6 +891,7 @@ export default class JournalingSystemPlugin extends Plugin {
       await this.ensureReviewFieldsBaseBlock(existing, level);
       await this.ensureReviewBaseBlock(existing, level, now);
       await this.ensureHigherReviewDailyBaseBlock(existing, level, now);
+      await this.ensureReviewNumericSummary(existing, level, now);
       await this.ensureReviewLongEntryEmbeds(existing, level, now);
       return existing;
     }
@@ -933,6 +946,15 @@ export default class JournalingSystemPlugin extends Plugin {
           ""
         );
       }
+    }
+
+    if (this.settings.reviews.includeNumericSummary) {
+      lines.push(
+        `## ${this.getNumericSummaryHeading()}`,
+        "",
+        ...this.createNumericSummaryBlock(level, now),
+        ""
+      );
     }
 
     if (this.shouldIncludeLongEntryEmbeds(level)) {
@@ -1255,6 +1277,41 @@ export default class JournalingSystemPlugin extends Plugin {
 
     if (withInsertedBlock !== content) {
       await this.app.vault.modify(file, withInsertedBlock);
+    }
+  }
+
+  async ensureReviewNumericSummary(
+    file: TFile,
+    level: ReviewLevel,
+    now = moment()
+  ): Promise<void> {
+    if (!this.settings.reviews.includeNumericSummary) {
+      return;
+    }
+
+    const content = await this.app.vault.read(file);
+    const heading = this.getNumericSummaryHeading();
+    const block = this.createNumericSummaryBlock(level, now).join("\n");
+    const updated = replaceGeneratedNumericSummaryInSection(content, heading, block);
+
+    if (updated && updated !== content) {
+      await this.app.vault.modify(file, updated);
+      return;
+    }
+
+    if (sectionExists(content, heading)) {
+      return;
+    }
+
+    const section = [`## ${heading}`, "", block].join("\n");
+    const withInsertedSection = insertSectionBeforeFirstHeading(
+      content,
+      [this.settings.reviews.longEntriesHeading, this.settings.reviews.reflectionHeading],
+      section
+    );
+
+    if (withInsertedSection !== content) {
+      await this.app.vault.modify(file, withInsertedSection);
     }
   }
 
@@ -1643,6 +1700,85 @@ export default class JournalingSystemPlugin extends Plugin {
 
   shouldIncludeHigherReviewDailyBase(level: ReviewLevel): boolean {
     return level !== "weekly" && this.settings.reviews.includeDailyBaseOnHigherReviews;
+  }
+
+  getNumericSummaryHeading(): string {
+    return (
+      this.settings.reviews.numericSummaryHeading.trim() ||
+      DEFAULT_SETTINGS.reviews.numericSummaryHeading
+    );
+  }
+
+  createNumericSummaryBlock(level: ReviewLevel, now = moment()): string[] {
+    const summaries = this.getDailyNumericPropertySummaries(level, now);
+    if (summaries.length === 0) {
+      return ["No numeric journal properties found for this period."];
+    }
+
+    return [
+      "| Property | Count | Mean | Min | Max |",
+      "| --- | ---: | ---: | ---: | ---: |",
+      ...summaries.map(
+        (summary) =>
+          `| ${escapeMarkdownTableCell(summary.label)} | ${summary.count} | ${formatNumericSummaryValue(summary.mean)} | ${formatNumericSummaryValue(summary.min)} | ${formatNumericSummaryValue(summary.max)} |`
+      ),
+    ];
+  }
+
+  getDailyNumericPropertySummaries(
+    level: ReviewLevel,
+    now = moment()
+  ): NumericPropertySummary[] {
+    const definitions = dedupeJournalPropertyDefinitions(
+      this.settings.properties.filter(
+        (property) =>
+          property.enabled &&
+          property.type === "number" &&
+          property.property.trim().length > 0
+      )
+    );
+
+    if (definitions.length === 0) {
+      return [];
+    }
+
+    const valuesByProperty = new Map<string, number[]>();
+    for (const definition of definitions) {
+      valuesByProperty.set(definition.property.trim(), []);
+    }
+
+    for (const file of this.getDailySourceFilesForReview(level, now)) {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+
+      for (const definition of definitions) {
+        const property = definition.property.trim();
+        const values = valuesByProperty.get(property);
+        if (!values) {
+          continue;
+        }
+
+        values.push(...parseNumericFrontmatterValues(frontmatterRecord[property]));
+      }
+    }
+
+    return definitions.flatMap((definition) => {
+      const values = valuesByProperty.get(definition.property.trim()) ?? [];
+      if (values.length === 0) {
+        return [];
+      }
+
+      const sum = values.reduce((total, value) => total + value, 0);
+      return [
+        {
+          label: definition.label.trim() || formatBasePropertyDisplayName(definition.property),
+          count: values.length,
+          mean: sum / values.length,
+          min: Math.min(...values),
+          max: Math.max(...values),
+        },
+      ];
+    });
   }
 
   async createLongEntryEmbedsBlock(level: ReviewLevel, now = moment()): Promise<string[]> {
@@ -2632,6 +2768,12 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       "Global switch for embedding matching daily ## Journal sections in review notes. Entries are included only when the section contains text.",
       "includeLongEntryEmbeds"
     );
+    this.addToggleSetting(
+      section,
+      "Numerical summaries",
+      "Add count, mean, min, and max tables for enabled daily number properties, such as mood, to generated review notes.",
+      "includeNumericSummary"
+    );
     this.addTextSetting(
       section,
       "Checklist heading",
@@ -2662,6 +2804,17 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       async (value) => {
         this.plugin.settings.reviews.longEntriesHeading =
           value || DEFAULT_SETTINGS.reviews.longEntriesHeading;
+        await this.plugin.saveSettings();
+      }
+    );
+    this.addTextSetting(
+      section,
+      "Numerical summary heading",
+      "Heading used above generated mean/min/max tables in review notes.",
+      this.plugin.settings.reviews.numericSummaryHeading,
+      async (value) => {
+        this.plugin.settings.reviews.numericSummaryHeading =
+          value || DEFAULT_SETTINGS.reviews.numericSummaryHeading;
         await this.plugin.saveSettings();
       }
     );
@@ -3626,6 +3779,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       | "includeManagedRollupBlock"
       | "includeInlineBases"
       | "includeLongEntryEmbeds"
+      | "includeNumericSummary"
       | "includeReviewChecklist"
       | "includeDailyBaseOnHigherReviews"
       | string,
@@ -3633,6 +3787,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       | "includeManagedRollupBlock"
       | "includeInlineBases"
       | "includeLongEntryEmbeds"
+      | "includeNumericSummary"
       | "includeReviewChecklist"
       | "includeDailyBaseOnHigherReviews"
   ): void {
@@ -3641,6 +3796,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       | "includeManagedRollupBlock"
       | "includeInlineBases"
       | "includeLongEntryEmbeds"
+      | "includeNumericSummary"
       | "includeReviewChecklist"
       | "includeDailyBaseOnHigherReviews");
     const setting = new Setting(containerEl).setName(name);
@@ -3862,8 +4018,15 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   );
   settings.reviews.includeReviewChecklist =
     settings.reviews.includeReviewChecklist === true;
+  settings.reviews.includeNumericSummary =
+    settings.reviews.includeNumericSummary === true;
   settings.reviews.includeDailyBaseOnHigherReviews =
     settings.reviews.includeDailyBaseOnHigherReviews === true;
+  settings.reviews.numericSummaryHeading =
+    typeof settings.reviews.numericSummaryHeading === "string" &&
+    settings.reviews.numericSummaryHeading.trim().length > 0
+      ? settings.reviews.numericSummaryHeading
+      : DEFAULT_SETTINGS.reviews.numericSummaryHeading;
   settings.schemaVersion = SETTINGS_SCHEMA_VERSION;
   return settings;
 }
@@ -3992,7 +4155,27 @@ function isLegacyDailyPropertyDefinition(property: JournalPropertyDefinition): b
     role === "wins" ||
     role === "fails" ||
     role === "topics"
-  );
+    );
+}
+
+function dedupeJournalPropertyDefinitions(
+  properties: JournalPropertyDefinition[]
+): JournalPropertyDefinition[] {
+  const seen = new Set<string>();
+  const deduped: JournalPropertyDefinition[] = [];
+
+  for (const property of properties) {
+    const cleanProperty = property.property.trim();
+    const key = cleanProperty.toLowerCase();
+    if (cleanProperty.length === 0 || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push({ ...property, property: cleanProperty });
+  }
+
+  return deduped;
 }
 
 function assignFrontmatterProperty(
@@ -4441,6 +4624,17 @@ function formatBaseString(value: string): string {
   return JSON.stringify(value);
 }
 
+function escapeMarkdownTableCell(value: string): string {
+  return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+
+function formatNumericSummaryValue(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(2).replace(/0+$/g, "").replace(/\.$/, "");
+}
+
 function getAvailableBasePropertiesFromSettings(
   settings: JournalingSystemSettings,
   kind: "daily" | "review"
@@ -4591,6 +4785,27 @@ function insertSectionAfterTitle(content: string, section: string): string {
     : `${before}\n\n${section}\n`;
 }
 
+function insertSectionBeforeFirstHeading(
+  content: string,
+  headings: string[],
+  section: string
+): string {
+  for (const heading of headings) {
+    const headingMatch = findHeadingLine(content, heading);
+    if (!headingMatch) {
+      continue;
+    }
+
+    const before = content.slice(0, headingMatch.start).trimEnd();
+    const after = content.slice(headingMatch.start).trimStart();
+    return before.length > 0
+      ? `${before}\n\n${section}\n\n${after}`
+      : `${section}\n\n${after}`;
+  }
+
+  return `${content.trimEnd()}\n\n${section}\n`;
+}
+
 function replaceGeneratedBaseBlockInSection(
   content: string,
   heading: string,
@@ -4650,6 +4865,41 @@ function replaceGeneratedLongEntriesInSection(
 
   const generatedMatch =
     /^\s*(?:(?:\*\*[^\n]+\*\*\s*)?(?:!\[\[[^\n]+\]\]|No long journal entries found for this period\.)\s*)+/.exec(
+      section
+    );
+  if (!generatedMatch) {
+    return null;
+  }
+
+  const remaining = section.slice(generatedMatch[0].length).trimStart();
+  const nextSection = remaining.length > 0 ? `\n${block}\n\n${remaining}` : `\n${block}\n`;
+  return `${content.slice(0, headingMatch.end)}${nextSection}${content.slice(sectionEnd)}`;
+}
+
+function replaceGeneratedNumericSummaryInSection(
+  content: string,
+  heading: string,
+  block: string
+): string | null {
+  const cleanHeading = heading.trim();
+  if (cleanHeading.length === 0) {
+    return null;
+  }
+
+  const headingMatch = findHeadingLine(content, cleanHeading);
+  if (!headingMatch) {
+    return null;
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  const section = content.slice(headingMatch.end, sectionEnd);
+
+  if (section.trim().length === 0) {
+    return `${content.slice(0, headingMatch.end)}\n${block}\n${content.slice(sectionEnd)}`;
+  }
+
+  const generatedMatch =
+    /^\s*(?:(?:\|\s*Property\s*\|\s*Count\s*\|\s*Mean\s*\|\s*Min\s*\|\s*Max\s*\|\s*\n\|\s*---\s*\|\s*---:\s*\|\s*---:\s*\|\s*---:\s*\|\s*---:\s*\|\s*\n(?:\|[^\n]*\|\s*\n?)*)|No numeric journal properties found for this period\.)/.exec(
       section
     );
   if (!generatedMatch) {
@@ -4970,6 +5220,28 @@ function flattenPropertyValue(value: unknown): string[] {
   }
 
   return [String(value)];
+}
+
+function parseNumericFrontmatterValues(value: unknown): number[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => parseNumericFrontmatterValues(entry));
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? [value] : [];
+  }
+
+  if (typeof value === "string") {
+    const clean = value.trim();
+    if (clean.length === 0) {
+      return [];
+    }
+
+    const numericValue = Number(clean);
+    return Number.isFinite(numericValue) ? [numericValue] : [];
+  }
+
+  return [];
 }
 
 function formatInitialTextValue(value: unknown): string {

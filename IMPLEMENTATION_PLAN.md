@@ -120,6 +120,8 @@ Review rollup model:
 - Inline Bases can be inserted as live evidence panels for underlying notes.
 - Generated review Bases filter daily notes to the current review period and display
   the configured daily journal properties.
+- Generated review notes report count, mean, min, and max for enabled daily
+  number properties across the review period.
 
 ## Release Workflow
 
