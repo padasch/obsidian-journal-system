@@ -628,6 +628,30 @@ export default class JournalingSystemPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "open-long-weekly-review-entry",
+      name: "Open long weekly review entry",
+      callback: async () => {
+        await this.openLongReviewEntry("weekly");
+      },
+    });
+
+    this.addCommand({
+      id: "open-long-monthly-review-entry",
+      name: "Open long monthly review entry",
+      callback: async () => {
+        await this.openLongReviewEntry("monthly");
+      },
+    });
+
+    this.addCommand({
+      id: "open-long-annual-review-entry",
+      name: "Open long annual review entry",
+      callback: async () => {
+        await this.openLongReviewEntry("annual");
+      },
+    });
+
+    this.addCommand({
       id: "open-weekly-review",
       name: "Open weekly review",
       callback: async () => {
@@ -639,7 +663,23 @@ export default class JournalingSystemPlugin extends Plugin {
       id: "start-weekly-review-wizard",
       name: "Start weekly review wizard",
       callback: () => {
-        new WeeklyReviewWizardModal(this.app, this).open();
+        new ReviewWizardModal(this.app, this, "weekly").open();
+      },
+    });
+
+    this.addCommand({
+      id: "start-monthly-review-wizard",
+      name: "Start monthly review wizard",
+      callback: () => {
+        new ReviewWizardModal(this.app, this, "monthly").open();
+      },
+    });
+
+    this.addCommand({
+      id: "start-annual-review-wizard",
+      name: "Start annual review wizard",
+      callback: () => {
+        new ReviewWizardModal(this.app, this, "annual").open();
       },
     });
 
@@ -700,6 +740,32 @@ export default class JournalingSystemPlugin extends Plugin {
     return longProperty ?? DEFAULT_PROPERTIES[1];
   }
 
+  getReviewLongProperty(): string {
+    const byId = this.settings.reviews.reviewProperties.find(
+      (property) => property.id === "journalLong" && property.type === "checkbox"
+    );
+    const byIdProperty = byId?.property?.trim();
+    if (byIdProperty && byIdProperty.length > 0) {
+      return byIdProperty;
+    }
+
+    const byName = this.settings.reviews.reviewProperties.find(
+      (property) =>
+        property.type === "checkbox" &&
+        property.property.trim().toLowerCase() === "journallong"
+    );
+    const byNameProperty = byName?.property?.trim();
+    if (byNameProperty && byNameProperty.length > 0) {
+      return byNameProperty;
+    }
+
+    const byLabel = this.settings.reviews.reviewProperties.find(
+      (property) => property.type === "checkbox" && /\blong\b/i.test(property.label)
+    );
+
+    return byLabel?.property.trim() ?? "";
+  }
+
   getShortProperty(): JournalPropertyDefinition | null {
     return (
       this.settings.properties.find(
@@ -739,6 +805,44 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     return hasContent;
+  }
+
+  async syncReviewLongEntryStatus(file: TFile): Promise<boolean> {
+    const hasContent = hasLongJournalEntryContent(
+      await this.app.vault.read(file),
+      this.settings.reviews.reflectionHeading
+    );
+    const longProperty = this.getReviewLongProperty();
+
+    if (longProperty.length === 0) {
+      return hasContent;
+    }
+
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const currentValue = isRecord(frontmatter)
+      ? isTruthyFrontmatterValue(frontmatter[longProperty])
+      : false;
+
+    if (currentValue !== hasContent) {
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        frontmatter[longProperty] = hasContent;
+      });
+    }
+
+    return hasContent;
+  }
+
+  async openLongReviewEntry(level: ReviewLevel, now = moment()): Promise<void> {
+    const file = await this.getOrCreateReviewNote(level, now);
+    const longProperty = this.getReviewLongProperty();
+
+    if (longProperty.length > 0) {
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        frontmatter[longProperty] = true;
+      });
+    }
+
+    await this.openFileAtHeading(file, this.settings.reviews.reflectionHeading);
   }
 
   async syncPictureStatus(file: TFile): Promise<boolean> {
@@ -975,6 +1079,7 @@ export default class JournalingSystemPlugin extends Plugin {
 
     if (existing) {
       await this.syncDailySourcePictureStatuses(level, now);
+      await this.syncReviewLongEntryStatus(existing);
       await this.writeReviewProperties(existing, level, now);
       await this.syncPictureStatus(existing);
       await this.cleanupLegacyReviewScaffolding(existing);
@@ -993,6 +1098,7 @@ export default class JournalingSystemPlugin extends Plugin {
       notePath,
       await this.createReviewNoteContent(level, now)
     );
+    await this.syncReviewLongEntryStatus(created);
     await this.syncPictureStatus(created);
     return created;
   }
@@ -1273,6 +1379,29 @@ export default class JournalingSystemPlugin extends Plugin {
     return summary;
   }
 
+  async generateReviewAiSummary(
+    level: Exclude<ReviewLevel, "weekly">,
+    now = moment()
+  ): Promise<string> {
+    const configuredSettings = normalizeLocalAiSettings(this.settings.ai);
+    if (!configuredSettings.enabled) {
+      throw new Error("Local AI review assistance is disabled.");
+    }
+    const settings = await this.resolveLocalAiSettings(configuredSettings);
+
+    const sourceText = await this.createReviewAiSourceText(level, now);
+    if (sourceText.length === 0) {
+      throw new Error(`No ${level} context is available for this period.`);
+    }
+
+    return requestOllamaReviewSummary(
+      settings,
+      sourceText,
+      this.getLocalAiPrompt(level),
+      settings.aspects
+    );
+  }
+
   private async createWeeklyAiSourceText(
     dailySummary: DailyReviewSummaryItem[]
   ): Promise<string> {
@@ -1297,6 +1426,43 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     return truncateText(blocks.join("\n\n---\n\n"), 18000);
+  }
+
+  private async createReviewAiSourceText(
+    level: Exclude<ReviewLevel, "weekly">,
+    now = moment()
+  ): Promise<string> {
+    const blocks: string[] = [];
+    const summaryProperty = this.getAiSummaryProperty();
+    const sourceFiles = this.getReviewSourceFilesForReview(level, now);
+    const dateProperty =
+      this.settings.automaticProperties.date.trim() ||
+      DEFAULT_SETTINGS.automaticProperties.date;
+
+    for (const file of sourceFiles) {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+      const content = await this.app.vault.read(file);
+      const reflectionText = extractSectionText(content, this.settings.reviews.reflectionHeading);
+      const summary = formatInitialTextValue(frontmatterRecord[summaryProperty]);
+      const legacySummary = formatInitialTextValue(frontmatterRecord.journalAISummary);
+      const label = formatJournalEmbedDateLabel(file, frontmatterRecord, dateProperty);
+
+      const parts = [
+        `Source: ${label}`,
+        summary ? `Summary: ${truncateText(summary, 1800)}` : "",
+        legacySummary && !summary ? `Summary: ${truncateText(legacySummary, 1800)}` : "",
+        reflectionText ? `Reflection: ${truncateText(reflectionText, 1800)}` : "",
+      ].filter((part) => part.length > 0);
+
+      if (parts.length <= 1) {
+        parts.push("No explicit summary text was found.");
+      }
+
+      blocks.push(parts.join("\n"));
+    }
+
+    return truncateText(blocks.join("\n\n---\n\n"), 22000);
   }
 
   async cleanupLegacyReviewScaffolding(file: TFile): Promise<void> {
@@ -1802,6 +1968,49 @@ export default class JournalingSystemPlugin extends Plugin {
       });
   }
 
+  getReviewSourceFilesForReview(level: ReviewLevel, now = moment()): TFile[] {
+    const automatic = this.settings.automaticProperties;
+    const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
+    const dateProperty = automatic.date.trim() || DEFAULT_SETTINGS.automaticProperties.date;
+    const source = this.getReviewSource(level, now);
+
+    return this.app.vault
+      .getMarkdownFiles()
+      .filter((file) => {
+        const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+        if (!isRecord(frontmatter)) {
+          return false;
+        }
+
+        const journalType = frontmatter[typeProperty];
+        if (journalType !== undefined && String(journalType) !== source.journalType) {
+          return false;
+        }
+
+        return frontmatterMatchesReviewPeriod(
+          frontmatter,
+          source.period,
+          dateProperty,
+          level
+        );
+      })
+      .sort((a, b) => {
+        const aFrontmatter = this.app.metadataCache.getFileCache(a)?.frontmatter;
+        const bFrontmatter = this.app.metadataCache.getFileCache(b)?.frontmatter;
+        const aDate = getJournalDateKey(
+          a,
+          isRecord(aFrontmatter) ? aFrontmatter : {},
+          dateProperty
+        );
+        const bDate = getJournalDateKey(
+          b,
+          isRecord(bFrontmatter) ? bFrontmatter : {},
+          dateProperty
+        );
+        return aDate.localeCompare(bDate) || a.path.localeCompare(b.path);
+      });
+  }
+
   async getDailyReviewSummary(
     level: ReviewLevel,
     now = moment()
@@ -1834,6 +2043,49 @@ export default class JournalingSystemPlugin extends Plugin {
         location: flattenPropertyValue(frontmatterRecord[locationProperty]).join("; "),
         mood: flattenPropertyValue(frontmatterRecord[moodProperty]).join("; "),
         hasLongEntry,
+      });
+    }
+
+    return items;
+  }
+
+  async getReviewWizardContextItems(
+    level: ReviewLevel,
+    now = moment()
+  ): Promise<DailyReviewSummaryItem[]> {
+    if (level === "weekly") {
+      return this.getDailyReviewSummary(level, now);
+    }
+
+    const dateProperty =
+      this.settings.automaticProperties.date.trim() ||
+      DEFAULT_SETTINGS.automaticProperties.date;
+    const summaryProperty = this.getAiSummaryProperty();
+    const summaryFallback = "journalAISummary";
+    const items: DailyReviewSummaryItem[] = [];
+
+    for (const file of this.getReviewSourceFilesForReview(level, now)) {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+      const content = await this.app.vault.read(file);
+      const longText = extractSectionText(
+        content,
+        this.settings.reviews.reflectionHeading
+      );
+
+      const shortSummary = formatInitialTextValue(frontmatterRecord[summaryProperty]);
+      const legacySummary = formatInitialTextValue(frontmatterRecord[summaryFallback]);
+      const label = formatJournalEmbedDateLabel(file, frontmatterRecord, dateProperty)
+        .replace(/^\*\*|\*\*$/g, "");
+
+      items.push({
+        label,
+        path: file.path,
+        shortText:
+          shortSummary.length > 0 ? shortSummary : longText.length > 0 ? longText : legacySummary,
+        location: "",
+        mood: "",
+        hasLongEntry: longText.length > 0,
       });
     }
 
@@ -2344,17 +2596,15 @@ class ReviewPeriodSelectionModal extends Modal {
           });
       });
 
-      if (level === "weekly") {
-        setting.addButton((button) => {
-          button
-            .setButtonText("Start wizard")
-            .setCta()
-            .onClick(() => {
-              this.close();
-              new WeeklyReviewWizardModal(this.app, this.plugin, option.date).open();
-            });
-        });
-      }
+      setting.addButton((button) => {
+        button
+          .setButtonText("Start wizard")
+          .setCta()
+          .onClick(() => {
+            this.close();
+            new ReviewWizardModal(this.app, this.plugin, level, option.date).open();
+          });
+      });
     }
   }
 
@@ -2363,10 +2613,10 @@ class ReviewPeriodSelectionModal extends Modal {
   }
 }
 
-class WeeklyReviewWizardModal extends Modal {
+class ReviewWizardModal extends Modal {
   private reviewFile: TFile | null = null;
   private properties: ReviewPropertyDefinition[] = [];
-  private dailySummary: DailyReviewSummaryItem[] = [];
+  private contextItems: DailyReviewSummaryItem[] = [];
   private initialFrontmatter: Record<string, unknown> = {};
   private values = new Map<string, string | number | string[] | boolean>();
   private stepIndex = 0;
@@ -2375,13 +2625,16 @@ class WeeklyReviewWizardModal extends Modal {
   private summaryStartedFromAi = false;
   private aiSummaryBusy = false;
   private readonly reviewDate: Moment;
+  private readonly reviewLevel: ReviewLevel;
 
   constructor(
     app: App,
     private readonly plugin: JournalingSystemPlugin,
+    reviewLevel: ReviewLevel,
     reviewDate: Moment = moment()
   ) {
     super(app);
+    this.reviewLevel = reviewLevel;
     this.reviewDate = reviewDate.clone();
   }
 
@@ -2393,17 +2646,25 @@ class WeeklyReviewWizardModal extends Modal {
     this.modalEl.addClass("journaling-system-modal-shell");
     applyModalAppearance(this.modalEl, this.plugin.settings);
     this.contentEl.addClass("journaling-system-modal");
-    this.setTitle(`Weekly review wizard - ${formatReviewPeriodTitle("weekly", this.reviewDate)}`);
+    this.setTitle(
+      `${capitalize(this.reviewLevel)} review wizard - ${formatReviewPeriodTitle(this.reviewLevel, this.reviewDate)}`
+    );
     this.contentEl.empty();
     this.contentEl.createDiv({
       cls: "journaling-system-field-hint",
-      text: "Preparing weekly review context...",
+      text: `Preparing ${this.reviewLevel} review context...`,
     });
 
     try {
-      this.reviewFile = await this.plugin.getOrCreateReviewNote("weekly", this.reviewDate);
-      this.properties = this.plugin.getReviewWizardProperties("weekly");
-      this.dailySummary = await this.plugin.getDailyReviewSummary("weekly", this.reviewDate);
+      this.reviewFile = await this.plugin.getOrCreateReviewNote(
+        this.reviewLevel,
+        this.reviewDate
+      );
+      this.properties = this.plugin.getReviewWizardProperties(this.reviewLevel);
+      this.contextItems = await this.plugin.getReviewWizardContextItems(
+        this.reviewLevel,
+        this.reviewDate
+      );
       const frontmatter = this.app.metadataCache.getFileCache(this.reviewFile)?.frontmatter;
       this.initialFrontmatter = isRecord(frontmatter) ? { ...frontmatter } : {};
       this.summaryStartedFromAi = isTruthyFrontmatterValue(
@@ -2413,7 +2674,7 @@ class WeeklyReviewWizardModal extends Modal {
 
       this.renderStep();
     } catch (error) {
-      new Notice(error instanceof Error ? error.message : "Could not start weekly review wizard.");
+      new Notice(error instanceof Error ? error.message : "Could not start review wizard.");
       this.close();
     }
   }
@@ -2444,7 +2705,7 @@ class WeeklyReviewWizardModal extends Modal {
     this.currentInput = null;
     this.contentEl.empty();
     this.setTitle(
-      `Weekly review wizard - ${formatReviewPeriodTitle("weekly", this.reviewDate)} (${this.stepIndex + 1}/${this.properties.length})`
+      `${capitalize(this.reviewLevel)} review wizard - ${formatReviewPeriodTitle(this.reviewLevel, this.reviewDate)} (${this.stepIndex + 1}/${this.properties.length})`
     );
 
     this.renderDailyContext(this.contentEl);
@@ -2509,7 +2770,9 @@ class WeeklyReviewWizardModal extends Modal {
   private renderSummaryOnlyStep(): void {
     this.currentInput = null;
     this.contentEl.empty();
-    this.setTitle(`Weekly review wizard - ${formatReviewPeriodTitle("weekly", this.reviewDate)}`);
+    this.setTitle(
+      `${capitalize(this.reviewLevel)} review wizard - ${formatReviewPeriodTitle(this.reviewLevel, this.reviewDate)}`
+    );
     this.renderDailyContext(this.contentEl);
     this.renderReviewSummary(this.contentEl);
 
@@ -2533,20 +2796,26 @@ class WeeklyReviewWizardModal extends Modal {
     });
     details.open = true;
     details.createEl("summary", {
-      text: `Daily context (${this.dailySummary.length} notes)`,
+      text: `Context for ${this.reviewLevel} review (${this.contextItems.length} notes)`,
       cls: "journaling-system-review-wizard-summary",
     });
 
     const body = details.createDiv({ cls: "journaling-system-review-wizard-context-body" });
-    if (this.dailySummary.length === 0) {
+    if (this.contextItems.length === 0) {
       body.createDiv({
         cls: "journaling-system-field-hint",
-        text: "No daily notes with matching journal properties were found for this week.",
+        text: `No matching notes were found for this ${formatReviewPeriodTitle(this.reviewLevel, this.reviewDate)} period.`,
       });
       return;
     }
 
-    for (const item of this.dailySummary) {
+    const sourceName = this.plugin.getReviewSource(this.reviewLevel, this.reviewDate).name;
+    body.createDiv({
+      text: `Sources: ${sourceName}`,
+      cls: "journaling-system-field-hint",
+    });
+
+    for (const item of this.contextItems) {
       const row = body.createDiv({ cls: "journaling-system-review-wizard-day" });
       row.createDiv({
         cls: "journaling-system-review-wizard-day-title",
@@ -2618,11 +2887,18 @@ class WeeklyReviewWizardModal extends Modal {
     this.renderStep();
 
     try {
-      this.summaryText = await this.plugin.generateWeeklyAiSummary(this.dailySummary);
+      if (this.reviewLevel === "weekly") {
+        this.summaryText = await this.plugin.generateWeeklyAiSummary(this.contextItems);
+      } else {
+        this.summaryText = await this.plugin.generateReviewAiSummary(
+          this.reviewLevel,
+          this.reviewDate
+        );
+      }
       this.summaryStartedFromAi = true;
       this.initialFrontmatter[this.plugin.getAiSummaryProperty()] = this.summaryText;
       this.initialFrontmatter[this.plugin.getAiSummaryFlagProperty()] = true;
-      new Notice("Generated local AI weekly summary draft.");
+      new Notice(`Generated local AI ${this.reviewLevel} summary draft.`);
     } catch (error) {
       new Notice(error instanceof Error ? error.message : "Could not generate AI summary.");
     } finally {
@@ -2663,7 +2939,7 @@ class WeeklyReviewWizardModal extends Modal {
 
     try {
       if (values.length > 0) {
-        await this.plugin.writeReviewValues(this.reviewFile, "weekly", values);
+        await this.plugin.writeReviewValues(this.reviewFile, this.reviewLevel, values);
       }
       await this.plugin.writeReviewSummary(
         this.reviewFile,
@@ -2675,9 +2951,9 @@ class WeeklyReviewWizardModal extends Modal {
         this.reviewFile,
         this.plugin.settings.reviews.reflectionHeading
       );
-      new Notice("Weekly review wizard complete.");
+      new Notice(`${capitalize(this.reviewLevel)} review wizard complete.`);
     } catch (error) {
-      new Notice(error instanceof Error ? error.message : "Could not save weekly review.");
+      new Notice(error instanceof Error ? error.message : "Could not save review.");
     }
   }
 
@@ -3004,10 +3280,10 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       text: "Daily, Weekly, Monthly, and Annual settings control each note type's prompt schedule, note naming, and level-specific review behavior.",
     });
     list.createEl("li", {
-      text: "Local AI settings optionally connect the weekly wizard to a local Ollama model and save generated guidance to a review property.",
+      text: "Local AI settings connect review wizards to a local Ollama model and save generated guidance to a review property.",
     });
     list.createEl("li", {
-      text: "Appearance settings control modal size and text size for the daily prompt and weekly review wizard.",
+      text: "Appearance settings control modal size and text size for the daily prompt and review wizards.",
     });
   }
 
@@ -3446,12 +3722,12 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     const section = createSettingsSection(containerEl, "Local AI settings");
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "Optional local-only weekly review assistance. The plugin talks to Ollama on localhost, puts generated guidance into the editable review summary, and does not send journal text to cloud services.",
+      text: "Optional local-only review assistance. The plugin talks to Ollama on localhost, puts generated guidance into the editable review summary, and does not send note text to cloud services.",
     });
 
     new Setting(section)
       .setName("Enable local AI review assistance")
-      .setDesc("Show AI summary generation in the weekly review wizard.")
+      .setDesc("Show AI summary generation in review wizards.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.ai.enabled)
@@ -3580,7 +3856,9 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
     new Setting(section)
       .setName("Review aspects")
-      .setDesc("One aspect per line. Prompts can insert this list with {{aspects}}.")
+      .setDesc(
+        "One reflection aspect per line. These guide AI output and are separate from topic tags or note links. Prompts can insert this list with {{aspects}}."
+      )
       .addTextArea((textarea) => {
         textarea
           .setValue(this.plugin.settings.ai.aspects.join("\n"))
@@ -3604,7 +3882,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     section.createEl("h3", { text: "Review AI prompts" });
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "Use {{sourceNotes}} where the journal context should be inserted and {{aspects}} where the aspect list should appear. If placeholders are missing, the plugin appends the missing context automatically. Weekly is used by the current wizard; monthly and annual are ready for later review flows.",
+      text: "Use {{sourceNotes}} where the journal context should be inserted and {{aspects}} where the aspect list should appear. If placeholders are missing, the plugin appends the missing context automatically.",
     });
     for (const level of REVIEW_LEVELS) {
       this.renderLocalAiPromptSetting(section, level);
@@ -3644,7 +3922,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     const section = createSettingsSection(containerEl, "Appearance settings");
     section.createDiv({
       cls: "journaling-system-section-note",
-      text: "Desktop modal sizing for the daily journal prompt and weekly review wizard. Mobile keeps the compact top-half layout.",
+      text: "Desktop modal sizing for the daily journal prompt and review wizards. Mobile keeps the compact top-half layout.",
     });
 
     this.addSliderSetting(
@@ -3685,8 +3963,8 @@ class JournalingSystemSettingTab extends PluginSettingTab {
 
     this.addSliderSetting(
       section,
-      "Weekly context height",
-      "Scrollable daily-context area inside the weekly review wizard.",
+      "Review context height",
+      "Scrollable context area inside the review wizard.",
       normalizeReviewContextHeight(this.plugin.settings.ui.reviewContextHeightPx),
       { min: 180, max: 560, step: 20, unit: "px" },
       async (value) => {
@@ -5630,6 +5908,16 @@ function parseShortTextEntries(text: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+}
+
+function extractSectionText(content: string, heading: string): string {
+  const headingMatch = findHeadingLine(content, heading);
+  if (!headingMatch) {
+    return "";
+  }
+
+  const sectionEnd = findSectionEnd(content, headingMatch);
+  return content.slice(headingMatch.end, sectionEnd).replace(/<!--[\s\S]*?-->/g, "").trim();
 }
 
 function normalizeCaptureEntry(line: string): string {
