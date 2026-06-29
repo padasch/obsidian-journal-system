@@ -48,6 +48,7 @@ interface LocalAiSettings {
   provider: LocalAiProvider;
   baseUrl: string;
   model: string;
+  language: string;
   summaryProperty: string;
   summaryAiProperty: string;
   aspects: string[];
@@ -532,6 +533,7 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     provider: "ollama",
     baseUrl: "http://127.0.0.1:11434",
     model: "llama3.2",
+    language: "English",
     summaryProperty: "journalSummary",
     summaryAiProperty: "journalSummaryAI",
     aspects: [...DEFAULT_LOCAL_AI_ASPECTS],
@@ -1402,7 +1404,8 @@ export default class JournalingSystemPlugin extends Plugin {
       settings,
       sourceText,
       this.getLocalAiPrompt("weekly"),
-      settings.aspects
+      settings.aspects,
+      settings.language
     );
     return summary;
   }
@@ -1426,7 +1429,8 @@ export default class JournalingSystemPlugin extends Plugin {
       settings,
       sourceText,
       this.getLocalAiPrompt(level),
-      settings.aspects
+      settings.aspects,
+      settings.language
     );
   }
 
@@ -4281,6 +4285,17 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       }
     );
 
+    this.addTextSetting(
+      section,
+      "Summary language",
+      "Language to generate AI summaries in (e.g. English, Deutsch, Français, en-US).",
+      this.plugin.settings.ai.language,
+      async (value) => {
+        this.plugin.settings.ai.language = normalizeAiLanguage(value);
+        await this.plugin.saveSettings();
+      }
+    );
+
     new Setting(section)
       .setName("Ollama status")
       .setDesc("Check whether the local server is reachable and whether the selected model is installed.")
@@ -5872,11 +5887,17 @@ function normalizeLocalAiSettings(value: unknown): LocalAiSettings {
     provider: "ollama",
     baseUrl: normalizeLocalAiBaseUrl(raw.baseUrl),
     model: normalizeLocalAiModel(raw.model),
+    language: normalizeAiLanguage(raw.language),
     summaryProperty: normalizeAiSummaryProperty(raw.summaryProperty),
     summaryAiProperty: normalizeAiSummaryFlagProperty(raw.summaryAiProperty),
     aspects: normalizeLocalAiAspects(raw.aspects),
     prompts: normalizeLocalAiPrompts(raw.prompts),
   };
+}
+
+function normalizeAiLanguage(value: unknown): string {
+  const language = String(value ?? "").trim();
+  return language.length > 0 ? language : DEFAULT_SETTINGS.ai.language;
 }
 
 function normalizeLocalAiAspects(value: unknown): string[] {
@@ -6917,8 +6938,10 @@ async function requestOllamaReviewSummary(
   settings: LocalAiSettings,
   sourceText: string,
   promptTemplate: string,
-  aspects: string[]
+  aspects: string[],
+  language: string
 ): Promise<string> {
+  const normalizedLanguage = normalizeAiLanguage(language);
   const response = await requestUrl({
     url: `${settings.baseUrl}/api/chat`,
     method: "POST",
@@ -6929,12 +6952,16 @@ async function requestOllamaReviewSummary(
       messages: [
         {
           role: "system",
-          content:
-            "You are a private local journaling assistant. Use only the supplied journal notes. Be concise, concrete, and reflective. Do not diagnose, moralize, or invent facts.",
+          content: `You are a private local journaling assistant. Write in ${normalizedLanguage}. Use only the supplied journal notes. Be concise, concrete, and reflective. Do not diagnose, moralize, or invent facts.`,
         },
         {
           role: "user",
-          content: buildReviewAiPrompt(promptTemplate, sourceText, aspects),
+          content: buildReviewAiPrompt(
+            promptTemplate,
+            sourceText,
+            aspects,
+            normalizedLanguage
+          ),
         },
       ],
       options: {
@@ -6982,16 +7009,21 @@ async function isOllamaReachable(baseUrl: string): Promise<boolean> {
 function buildReviewAiPrompt(
   promptTemplate: string,
   sourceText: string,
-  aspects: string[]
+  aspects: string[],
+  language: string
 ): string {
   const aspectsText = formatAiAspectList(aspects);
+  const normalizedLanguage = normalizeAiLanguage(language);
   let prompt = promptTemplate.trim();
   const usedAspectsPlaceholder = prompt.includes("{{aspects}}");
   const usedSourcePlaceholder = prompt.includes("{{sourceNotes}}");
+  const usedLanguagePlaceholder = prompt.includes("{{language}}");
 
   prompt = prompt
     .split("{{aspects}}")
     .join(aspectsText)
+    .split("{{language}}")
+    .join(normalizedLanguage)
     .split("{{sourceNotes}}")
     .join(sourceText);
 
@@ -6999,6 +7031,9 @@ function buildReviewAiPrompt(
     prompt,
     !usedAspectsPlaceholder && aspectsText.length > 0
       ? ["", "Review aspects:", aspectsText].join("\n")
+      : "",
+    !usedLanguagePlaceholder && normalizedLanguage.length > 0
+      ? ["", `Language: ${normalizedLanguage}`].join("\n")
       : "",
     !usedSourcePlaceholder ? ["", "Source notes:", sourceText].join("\n") : "",
   ].filter((section) => section.length > 0);
