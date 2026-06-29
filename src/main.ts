@@ -41,6 +41,7 @@ type BaseColumnSizes = Record<string, number>;
 type BasePropertyListKey = "baseProperties" | "reviewBaseProperties";
 type DailyPromptBehavior = "always" | "if-no-quick-entry";
 type LocalAiProvider = "ollama";
+type TopicSuggestionScope = "daily" | ReviewLevel;
 
 interface LocalAiSettings {
   enabled: boolean;
@@ -73,6 +74,7 @@ interface ReviewPropertyDefinition {
   property: string;
   placeholder: string;
   type: JournalPropertyType;
+  isTopicField?: boolean;
   levels: ReviewLevel[];
   builtIn?: boolean;
 }
@@ -156,6 +158,13 @@ interface JournalingSystemSettings {
     baseRowHeight: BaseRowHeight;
     baseColumnSizes: BaseColumnSizes;
     reviewProperties: ReviewPropertyDefinition[];
+    topicSuggestionFolders: {
+      root: string;
+      daily: string;
+      weekly: string;
+      monthly: string;
+      annual: string;
+    };
     checklistItems: Record<ReviewLevel, string[]>;
   };
 }
@@ -409,6 +418,7 @@ const DEFAULT_REVIEW_PROPERTIES: ReviewPropertyDefinition[] = [
     property: "journalTopics",
     placeholder: "One topic or [[link]] per line",
     type: "multiselect",
+    isTopicField: true,
     levels: ["weekly", "monthly", "annual"],
     builtIn: true,
   },
@@ -601,6 +611,13 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     baseRowHeight: "extra",
     baseColumnSizes: { ...DEFAULT_REVIEW_BASE_COLUMN_SIZES },
     reviewProperties: DEFAULT_REVIEW_PROPERTIES.map((property) => ({ ...property })),
+    topicSuggestionFolders: {
+      root: "",
+      daily: "",
+      weekly: "",
+      monthly: "",
+      annual: "",
+    },
     checklistItems: cloneChecklistItems(DEFAULT_REVIEW_CHECKLIST_ITEMS),
   },
 };
@@ -2442,10 +2459,19 @@ export default class JournalingSystemPlugin extends Plugin {
     }
   }
 
-  collectExistingValues(propertyName: string): string[] {
+  collectExistingValues(
+    propertyName: string,
+    scope: TopicSuggestionScope = "daily"
+  ): string[] {
     const values = new Set<string>();
+    const scanRoots = this.getTopicSuggestionScanRoots(scope);
+    const files = this.getMarkdownFilesForTopicSuggestionScan(scanRoots);
 
-    for (const file of this.app.vault.getMarkdownFiles()) {
+    for (const file of files) {
+      if (!file || file.extension !== "md") {
+        continue;
+      }
+
       const cache = this.app.metadataCache.getFileCache(file);
       const rawValue = cache?.frontmatter?.[propertyName];
 
@@ -2455,6 +2481,92 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }
+
+  private getTopicSuggestionScanRoots(scope: TopicSuggestionScope): string[] {
+    const rootTemplate = this.settings.reviews.topicSuggestionFolders.root.trim();
+    const configuredRoot = this.getTopicSuggestionTemplateRoot(rootTemplate);
+
+    const scopedTemplate =
+      scope === "daily"
+        ? this.settings.reviews.topicSuggestionFolders.daily.trim() ||
+          this.settings.dailyNote.folder
+        : this.settings.reviews.topicSuggestionFolders[scope].trim() ||
+          this.settings.reviews.folder;
+
+    const scopedRoot = this.getTopicSuggestionTemplateRoot(scopedTemplate);
+    const scanRoots = [
+      configuredRoot,
+      scopedRoot,
+      configuredRoot.length > 0 && scopedRoot.length > 0
+        ? normalizePath(`${configuredRoot}/${scopedRoot}`)
+        : "",
+    ];
+
+    return dedupeProperties(scanRoots.filter((entry) => entry.length > 0));
+  }
+
+  private getMarkdownFilesForTopicSuggestionScan(scanRoots: string[]): TFile[] {
+    const normalizedRoots = dedupeProperties(scanRoots.map((root) => normalizePath(root)));
+    const rootFiles: TFile[] = [];
+    const seenPaths = new Set<string>();
+
+    if (normalizedRoots.length === 0) {
+      return this.app.vault.getMarkdownFiles();
+    }
+
+    for (const root of normalizedRoots) {
+      const folder = this.app.vault.getFolderByPath(root);
+      if (!folder) {
+        continue;
+      }
+
+      this.collectMarkdownFilesInFolder(folder, rootFiles, seenPaths);
+    }
+
+    if (rootFiles.length === 0) {
+      return this.app.vault.getMarkdownFiles();
+    }
+
+    return rootFiles;
+  }
+
+  private collectMarkdownFilesInFolder(
+    folder: TFolder,
+    target: TFile[],
+    seenPaths: Set<string>
+  ): void {
+    for (const child of folder.children) {
+      if (child instanceof TFile) {
+        if (child.extension === "md" && !seenPaths.has(child.path)) {
+          seenPaths.add(child.path);
+          target.push(child);
+        }
+        continue;
+      }
+
+      if (child instanceof TFolder) {
+        this.collectMarkdownFilesInFolder(child, target, seenPaths);
+      }
+    }
+  }
+
+  private getTopicSuggestionTemplateRoot(folderTemplate: string): string {
+    const cleaned = normalizePath(folderTemplate.trim());
+    if (cleaned.length === 0) {
+      return "";
+    }
+
+    const segments = cleaned.split("/").filter((segment) => segment.length > 0);
+    const staticSegments: string[] = [];
+    for (const segment of segments) {
+      if (segment.includes("{")) {
+        break;
+      }
+      staticSegments.push(segment);
+    }
+
+    return normalizePath(staticSegments.join("/"));
   }
 
   async getTodayFrontmatter(now = moment()): Promise<Record<string, unknown>> {
@@ -2516,13 +2628,6 @@ class DailyPromptDecisionModal extends Modal {
             this.close();
             await this.plugin.snoozeDailyPrompt();
           });
-      })
-      .addButton((button) => {
-        button
-          .setButtonText("Skip")
-          .onClick(() => {
-            this.close();
-          });
       });
   }
 
@@ -2554,11 +2659,6 @@ class ReviewPromptDecisionModal extends Modal {
             this.close();
             await this.plugin.openReview(this.level);
           });
-      })
-      .addButton((button) => {
-        button.setButtonText("Skip").onClick(() => {
-          this.close();
-        });
       });
   }
 
@@ -2740,16 +2840,17 @@ class ReviewWizardModal extends Modal {
       this.plugin,
       fieldEl,
       definition,
-      this.values.get(property.id) ?? this.initialFrontmatter[property.property]
+      this.values.get(property.id) ?? this.initialFrontmatter[property.property],
+      this.reviewLevel
     );
 
     if (
       definition.type === "multiselect" &&
-      this.isTopicProperty(property.property, property.label)
+      this.isTopicProperty(property)
     ) {
       const topicInput = this.currentInput as ReviewTopicsInput | null;
       if (topicInput?.addValues) {
-        this.renderReviewTopicPickerButton(fieldEl, property.property, topicInput);
+        this.renderReviewTopicPickerButton(fieldEl, property, topicInput);
       }
     }
 
@@ -2774,14 +2875,18 @@ class ReviewWizardModal extends Modal {
       });
   }
 
-  private isTopicProperty(propertyName: string, propertyLabel: string): boolean {
-    const value = `${propertyName} ${propertyLabel}`.toLowerCase();
-    return /\b(topic|topics|theme|themes)\b/.test(value);
+  private isTopicProperty(property: ReviewPropertyDefinition): boolean {
+    return (
+      property.isTopicField === true ||
+      /\b(topic|topics|theme|themes)\b/.test(
+        `${property.property} ${property.label}`.toLowerCase()
+      )
+    );
   }
 
   private renderReviewTopicPickerButton(
     fieldEl: HTMLElement,
-    propertyName: string,
+    property: ReviewPropertyDefinition,
     topicInput: ReviewTopicsInput
   ): void {
     const actionRow = fieldEl.createDiv({
@@ -2792,8 +2897,8 @@ class ReviewWizardModal extends Modal {
       .onClick(() => {
         new ReviewTopicsPickerModal(
           this.app,
-          propertyName,
-          this.plugin.collectExistingValues(propertyName),
+          property.property,
+          this.plugin.collectExistingValues(property.property, this.reviewLevel),
           topicInput.getValues(),
           (selectedValues) => {
             topicInput.addValues(selectedValues);
@@ -3035,7 +3140,8 @@ class JournalingPromptModal extends Modal {
         this.plugin,
         fieldEl,
         definition,
-        initialFrontmatter[definition.property]
+        initialFrontmatter[definition.property],
+        "daily"
       );
       this.inputs.set(definition.id, input);
     }
@@ -3123,7 +3229,8 @@ function createJournalInput(
   plugin: JournalingSystemPlugin,
   fieldEl: HTMLElement,
   definition: JournalPropertyDefinition,
-  initialValue: unknown
+  initialValue: unknown,
+  collectScope: TopicSuggestionScope = "daily"
 ): JournalFieldInput {
   if (definition.type === "text") {
     const input =
@@ -3185,7 +3292,7 @@ function createJournalInput(
     };
   }
 
-  const existingValues = plugin.collectExistingValues(definition.property);
+  const existingValues = plugin.collectExistingValues(definition.property, collectScope);
   const multiInput = new MultiSelectPropertyInput(
     fieldEl,
     existingValues,
@@ -3278,6 +3385,9 @@ class ReviewTopicsPickerModal extends Modal {
   private searchInput: HTMLInputElement | null = null;
   private listContainer: HTMLElement | null = null;
   private insertButton: HTMLButtonElement | null = null;
+  private optionRows: HTMLElement[] = [];
+  private filteredValues: string[] = [];
+  private highlightedOptionIndex = -1;
 
   constructor(
     app: App,
@@ -3320,6 +3430,7 @@ class ReviewTopicsPickerModal extends Modal {
     });
     this.searchInput.placeholder = "Search existing entries...";
     this.searchInput.addEventListener("input", () => this.renderList());
+    this.searchInput.addEventListener("keydown", (event) => this.handleSearchKeydown(event));
 
     this.listContainer = this.contentEl.createDiv({
       cls: "journaling-system-topic-picker-list",
@@ -3356,6 +3467,7 @@ class ReviewTopicsPickerModal extends Modal {
 
     const query = this.searchInput?.value.trim() ?? "";
     this.listContainer.empty();
+    this.optionRows = [];
 
     const availableOptions = this.availableValues
       .map((value) => ({
@@ -3369,6 +3481,17 @@ class ReviewTopicsPickerModal extends Modal {
           : b.score - a.score || a.value.localeCompare(b.value)
       );
 
+    this.filteredValues = availableOptions
+      .slice(0, 30)
+      .map((entry) => entry.value);
+
+    if (
+      this.highlightedOptionIndex < 0 ||
+      this.highlightedOptionIndex >= this.filteredValues.length
+    ) {
+      this.highlightedOptionIndex = this.filteredValues.length > 0 ? 0 : -1;
+    }
+
     if (availableOptions.length === 0) {
       this.listContainer.createDiv({
         text: query.length === 0
@@ -3376,13 +3499,22 @@ class ReviewTopicsPickerModal extends Modal {
           : "No results. Type more or add a new value directly in the field.",
         cls: "journaling-system-field-hint",
       });
+      this.highlightedOptionIndex = -1;
       return;
     }
 
-    for (const { value } of availableOptions.slice(0, 30)) {
+    for (const [index, { value }] of availableOptions.slice(0, 30).entries()) {
       const row = this.listContainer.createDiv({
         cls: "journaling-system-topic-picker-item",
       });
+      if (index === this.highlightedOptionIndex) {
+        row.addClass("is-active");
+      }
+
+      row.addEventListener("mousemove", () => {
+        this.setHighlightedIndex(index);
+      });
+
       const checkbox = row.createEl("input", { type: "checkbox" });
       const normalized = value.toLowerCase();
       checkbox.checked = this.selectedValues.has(normalized);
@@ -3394,7 +3526,112 @@ class ReviewTopicsPickerModal extends Modal {
         }
         this.updateInsertState();
       });
+
+      row.addEventListener("click", (event) => {
+        if (event.target === checkbox) {
+          return;
+        }
+        checkbox.checked = !checkbox.checked;
+        checkbox.dispatchEvent(new Event("change"));
+      });
+
       row.createEl("span", { text: value });
+      this.optionRows.push(row);
+    }
+  }
+
+  private handleSearchKeydown(event: KeyboardEvent): void {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      this.moveHighlightedOption(1);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      this.moveHighlightedOption(-1);
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void this.insertFromPicker();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.close();
+    }
+  }
+
+  private async insertFromPicker(): Promise<void> {
+    const query = this.searchInput?.value.trim() ?? "";
+
+    if (this.highlightedOptionIndex >= 0 && this.highlightedOptionIndex < this.filteredValues.length) {
+      const value = this.filteredValues[this.highlightedOptionIndex];
+      this.selectedValues.set(value.toLowerCase(), value);
+      this.updateInsertState();
+      this.resetSearchInput();
+      this.renderList();
+      return;
+    }
+
+    if (query.length > 0) {
+      this.selectedValues.set(query.toLowerCase(), query);
+      this.updateInsertState();
+      this.resetSearchInput();
+      this.renderList();
+      return;
+    }
+
+    if (this.selectedValues.size > 0 && this.insertButton) {
+      await this.onSelectValues(Array.from(this.selectedValues.values()));
+      this.close();
+      return;
+    }
+
+    this.close();
+  }
+
+  private resetSearchInput(): void {
+    if (!this.searchInput) {
+      return;
+    }
+
+    this.searchInput.value = "";
+    this.searchInput.focus();
+  }
+
+  private moveHighlightedOption(delta: number): void {
+    if (!this.filteredValues.length) {
+      return;
+    }
+
+    if (this.highlightedOptionIndex === -1) {
+      this.highlightedOptionIndex = 0;
+    } else {
+      this.highlightedOptionIndex = (this.highlightedOptionIndex + delta + this.filteredValues.length) % this.filteredValues.length;
+    }
+    this.updateHighlightedRow();
+  }
+
+  private setHighlightedIndex(index: number): void {
+    if (index < 0 || index >= this.filteredValues.length) {
+      return;
+    }
+
+    this.highlightedOptionIndex = index;
+    this.updateHighlightedRow();
+  }
+
+  private updateHighlightedRow(): void {
+    for (const row of this.optionRows) {
+      row.removeClass("is-active");
+    }
+
+    if (this.highlightedOptionIndex >= 0 && this.highlightedOptionIndex < this.optionRows.length) {
+      this.optionRows[this.highlightedOptionIndex].addClass("is-active");
     }
   }
 
@@ -3418,6 +3655,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     containerEl.createEl("h1", { text: "Journaling System" });
     this.displaySystemIdea(containerEl);
     this.displayBasicSettings(containerEl);
+    this.displayTopicSuggestionFolderSettings(containerEl);
     this.displayPropertySettings(containerEl);
     this.displayBaseSettings(containerEl);
     this.displayDailySettings(containerEl);
@@ -3561,6 +3799,72 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       async (value) => {
         this.plugin.settings.reviews.reflectionHeading =
           value || DEFAULT_SETTINGS.reviews.reflectionHeading;
+        await this.plugin.saveSettings();
+      }
+    );
+  }
+
+  private displayTopicSuggestionFolderSettings(containerEl: HTMLElement): void {
+    const section = createSettingsSection(
+      containerEl,
+      "Topic suggestion scan folders"
+    );
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Limit where existing topic values are learned from. Keep defaults empty to use the existing daily/review folders from above.",
+    });
+
+    this.addFolderSetting(
+      section,
+      "Common root",
+      "Optional shared parent folder for topic suggestions. Date tokens such as {YYYY} are supported.",
+      this.plugin.settings.reviews.topicSuggestionFolders.root,
+      async (value) => {
+        this.plugin.settings.reviews.topicSuggestionFolders.root = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addFolderSetting(
+      section,
+      "Daily override",
+      "Scan path (inside the common root) for daily topic suggestions. Date tokens are supported.",
+      this.plugin.settings.reviews.topicSuggestionFolders.daily,
+      async (value) => {
+        this.plugin.settings.reviews.topicSuggestionFolders.daily = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addFolderSetting(
+      section,
+      "Weekly override",
+      "Scan path (inside the common root) for weekly topic suggestions. If empty, falls back to the common/review folder settings.",
+      this.plugin.settings.reviews.topicSuggestionFolders.weekly,
+      async (value) => {
+        this.plugin.settings.reviews.topicSuggestionFolders.weekly = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addFolderSetting(
+      section,
+      "Monthly override",
+      "Scan path (inside the common root) for monthly topic suggestions. If empty, falls back to the common/review folder settings.",
+      this.plugin.settings.reviews.topicSuggestionFolders.monthly,
+      async (value) => {
+        this.plugin.settings.reviews.topicSuggestionFolders.monthly = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    this.addFolderSetting(
+      section,
+      "Annual override",
+      "Scan path (inside the common root) for annual topic suggestions. If empty, falls back to the common/review folder settings.",
+      this.plugin.settings.reviews.topicSuggestionFolders.annual,
+      async (value) => {
+        this.plugin.settings.reviews.topicSuggestionFolders.annual = value;
         await this.plugin.saveSettings();
       }
     );
@@ -4387,8 +4691,8 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     });
 
     const labels = isReview
-      ? ["On", "Label", "Property", "Type", "Levels", ""]
-      : ["On", "Label", "Property", "Placeholder", "Type", "Min", "Max", ""];
+        ? ["On", "Label", "Property", "Type", "Topic field", "Levels", ""]
+        : ["On", "Label", "Property", "Placeholder", "Type", "Min", "Max", ""];
 
     for (const label of labels) {
       row.createDiv({ text: label });
@@ -4611,6 +4915,15 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     type.value = property.type;
     type.addEventListener("change", async () => {
       property.type = type.value as JournalPropertyType;
+      await this.plugin.saveSettings();
+    });
+
+    const topicFieldCell = row.createDiv();
+    const topicField = topicFieldCell.createEl("input", { type: "checkbox" });
+    topicField.checked = property.isTopicField === true;
+    topicField.ariaLabel = `Treat ${property.label} as a topic picker field`;
+    topicField.addEventListener("change", async () => {
+      property.isTopicField = topicField.checked;
       await this.plugin.saveSettings();
     });
 
@@ -4984,6 +5297,9 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   settings.reviews.reviewProperties = normalizeReviewPropertyDefinitions(
     settings.reviews.reviewProperties
   );
+  settings.reviews.topicSuggestionFolders = normalizeTopicSuggestionFolders(
+    settings.reviews.topicSuggestionFolders
+  );
   settings.reviews.checklistItems = normalizeChecklistItemsByLevel(
     settings.reviews.checklistItems
   );
@@ -5304,6 +5620,11 @@ function normalizeReviewPropertyDefinitions(
         typeof property.placeholder === "string"
           ? property.placeholder
           : defaultProperty?.placeholder ?? "",
+      isTopicField:
+        property.isTopicField === true ||
+        (!("isTopicField" in property) &&
+          defaultProperty?.isTopicField === true) ||
+        false,
       type: normalizeJournalPropertyType(property.type, defaultProperty?.type ?? "text"),
       levels: normalizeReviewLevels(property.levels, defaultProperty?.levels ?? ["weekly"]),
       builtIn: property.builtIn ?? defaultProperty?.builtIn,
@@ -5317,6 +5638,26 @@ function normalizeReviewPropertyDefinitions(
   }
 
   return Array.from(normalized.values());
+}
+
+function normalizeTopicSuggestionFolders(value: unknown): {
+  root: string;
+  daily: string;
+  weekly: string;
+  monthly: string;
+  annual: string;
+} {
+  const record = isRecord(value) ? value : {};
+  const normalizeFolder = (entry: unknown): string =>
+    typeof entry === "string" ? normalizePath(entry.trim()) : "";
+
+  return {
+    root: normalizeFolder(record.root),
+    daily: normalizeFolder(record.daily),
+    weekly: normalizeFolder(record.weekly),
+    monthly: normalizeFolder(record.monthly),
+    annual: normalizeFolder(record.annual),
+  };
 }
 
 function normalizeJournalPropertyType(

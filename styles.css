@@ -152,7 +152,7 @@
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: 24px minmax(120px, 1fr) minmax(130px, 1fr) minmax(115px, 0.8fr) minmax(220px, 1.2fr) 72px;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(130px, 1fr) minmax(115px, 0.7fr) 92px minmax(220px, 1.2fr) 72px;
 }
 
 .journaling-system-review-levels {
@@ -518,6 +518,10 @@
 }
 
 .journaling-system-topic-picker-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.journaling-system-topic-picker-item.is-active {
   background: var(--background-modifier-hover);
 }
 
