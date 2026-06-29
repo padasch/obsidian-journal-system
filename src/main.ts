@@ -1321,6 +1321,17 @@ export default class JournalingSystemPlugin extends Plugin {
     throw new Error("Could not find a reachable local Ollama server.");
   }
 
+  async listLocalOllamaModels(
+    settings = normalizeLocalAiSettings(this.settings.ai)
+  ): Promise<string[]> {
+    const resolved = await this.resolveLocalAiSettings(settings);
+    const response = await requestOllamaTags(resolved.baseUrl);
+
+    return dedupeProperties(
+      getOllamaModelNames(response.json).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    );
+  }
+
   async findAndUseLocalOllama(): Promise<string> {
     const baseUrl = await this.discoverLocalOllamaBaseUrl(
       normalizeLocalAiBaseUrl(this.settings.ai.baseUrl)
@@ -3765,17 +3776,7 @@ class JournalingSystemSettingTab extends PluginSettingTab {
       }
     );
 
-    this.addTextSetting(
-      section,
-      "Model",
-      "Ollama model used for review summaries. Small default: llama3.2.",
-      this.plugin.settings.ai.model,
-      async (value) => {
-        this.plugin.settings.ai.model =
-          value.trim() || DEFAULT_SETTINGS.ai.model;
-        await this.plugin.saveSettings();
-      }
-    );
+    this.renderLocalAiModelSetting(section);
 
     this.addTextSetting(
       section,
@@ -3912,6 +3913,116 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         },
       }
     );
+  }
+
+  private renderLocalAiModelSetting(containerEl: HTMLElement): void {
+    const setting = new Setting(containerEl)
+      .setName("Model")
+      .setDesc(
+        "Ollama model used for review summaries. Small default: llama3.2."
+      );
+
+    const selectedModelText = setting.controlEl.createDiv({
+      cls: "journaling-system-ollama-model-selection",
+      text: `Selected model: ${this.plugin.settings.ai.model}`,
+    });
+
+    const actions = setting.settingEl.createDiv({
+      cls: "journaling-system-ollama-model-actions",
+    });
+
+    let chooseModelButton: ButtonComponent | null = null;
+
+    const description = setting.descEl;
+    let installedModels: string[] = [];
+
+    const updateDescription = (models: string[], baseDescription?: string): void => {
+      if (!description) {
+        return;
+      }
+
+      const detectedText =
+        models.length === 0
+          ? "No local models discovered yet. Click Refresh models."
+          : `Detected local models (${models.length}): ${models.join(", ")}`;
+      const extra =
+        baseDescription && baseDescription.length > 0
+          ? `${baseDescription} `
+          : "";
+
+      description.empty();
+      description.createEl("div", {
+        text: `${extra}Ollama model used for review summaries. Small default: llama3.2.`,
+      });
+      description.createEl("div", {
+        text: detectedText,
+        cls: "journaling-system-setting-description",
+      });
+    };
+
+    const applySelectedModel = async (value: string): Promise<void> => {
+      this.plugin.settings.ai.model = value;
+      selectedModelText.setText(`Selected model: ${value}`);
+      updateDescription(installedModels);
+      await this.plugin.saveSettings();
+    };
+
+    const openModelPicker = () => {
+      new OllamaModelSelectModal(
+        this.app,
+        installedModels,
+        async (model) => {
+          await applySelectedModel(model);
+        }
+      ).open();
+    };
+
+    const updateAvailableModels = async (showResultMessage = true): Promise<void> => {
+      chooseModelButton?.setDisabled(true);
+      try {
+        installedModels = await this.plugin.listLocalOllamaModels();
+        if (installedModels.length === 0) {
+          updateDescription([], "No installed models were returned.");
+          chooseModelButton?.setDisabled(true);
+          if (showResultMessage) {
+            new Notice("No local Ollama models were found.");
+          }
+          return;
+        }
+
+        updateDescription(installedModels, "Local Ollama models:");
+        chooseModelButton?.setDisabled(false);
+        if (!installedModels.includes(this.plugin.settings.ai.model)) {
+          const fallback = installedModels[0] ?? DEFAULT_SETTINGS.ai.model;
+          await applySelectedModel(fallback);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not read local models.";
+        updateDescription([], `Could not reach local Ollama: ${message}`);
+        chooseModelButton?.setDisabled(true);
+      } finally {
+        if (showResultMessage && installedModels.length > 0) {
+          new Notice("Local Ollama models refreshed.");
+        }
+      }
+    };
+
+    chooseModelButton = new ButtonComponent(actions)
+      .setButtonText("Choose installed model")
+      .setTooltip("Pick an installed Ollama model.")
+      .setCta()
+      .onClick(async () => {
+        openModelPicker();
+      });
+
+    new ButtonComponent(actions)
+      .setButtonText("Refresh models")
+      .setTooltip("Rescan for installed Ollama models.")
+      .onClick(async () => {
+        await updateAvailableModels();
+      });
+
+    void updateAvailableModels(false);
   }
 
   private displayAppearanceSettings(containerEl: HTMLElement): void {
@@ -4609,6 +4720,30 @@ class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
 
   onChooseItem(folder: TFolder): void {
     void this.onChooseFolder(folder);
+  }
+}
+
+class OllamaModelSelectModal extends FuzzySuggestModal<string> {
+  constructor(
+    app: App,
+    private readonly models: string[],
+    private readonly onChooseModel: (model: string) => void | Promise<void>
+  ) {
+    super(app);
+    this.setPlaceholder("Choose an installed Ollama model");
+  }
+
+  getItems(): string[] {
+    return this.models;
+  }
+
+  getItemText(model: string): string {
+    return model;
+  }
+
+  onChooseItem(model: string): void {
+    void this.onChooseModel(model);
+    this.close();
   }
 }
 
