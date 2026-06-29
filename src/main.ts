@@ -3854,30 +3854,26 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         });
       });
 
-    new Setting(section)
-      .setName("Review aspects")
-      .setDesc(
-        "One reflection aspect per line. These guide AI output and are separate from topic tags or note links. Prompts can insert this list with {{aspects}}."
-      )
-      .addTextArea((textarea) => {
-        textarea
-          .setValue(this.plugin.settings.ai.aspects.join("\n"))
-          .onChange(async (value) => {
-            this.plugin.settings.ai.aspects = normalizeLocalAiAspects(value);
-            await this.plugin.saveSettings();
-          });
-        textarea.inputEl.addClass("journaling-system-ai-prompt-textarea");
-      })
-      .addButton((button) => {
-        button
-          .setButtonText("Reset")
-          .setTooltip("Reset to default review aspects")
-          .onClick(async () => {
-            this.plugin.settings.ai.aspects = [...DEFAULT_LOCAL_AI_ASPECTS];
-            await this.plugin.saveSettings();
-            this.display();
-          });
-      });
+    this.addFullWidthTextAreaSetting(
+      section,
+      "Review aspects",
+      "One reflection aspect per line. These guide AI output and are separate from topic tags or note links. Prompts can insert this list with {{aspects}}.",
+      this.plugin.settings.ai.aspects.join("\n"),
+      async (value) => {
+        this.plugin.settings.ai.aspects = normalizeLocalAiAspects(value);
+        await this.plugin.saveSettings();
+      },
+      {
+        textareaClass: "journaling-system-ai-prompt-textarea",
+        resetLabel: "Reset",
+        resetTooltip: "Reset to default review aspects",
+        onReset: async () => {
+          this.plugin.settings.ai.aspects = [...DEFAULT_LOCAL_AI_ASPECTS];
+          await this.plugin.saveSettings();
+          this.display();
+        },
+      }
+    );
 
     section.createEl("h3", { text: "Review AI prompts" });
     section.createDiv({
@@ -3893,29 +3889,29 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     containerEl: HTMLElement,
     level: ReviewLevel
   ): void {
-    const setting = new Setting(containerEl)
-      .setName(`${capitalize(level)} AI prompt`)
-      .setDesc(`Prompt template for ${level} AI review guidance.`);
-    setting.addTextArea((textarea) => {
-      textarea
-        .setValue(this.plugin.settings.ai.prompts[level])
-        .onChange(async (value) => {
-          this.plugin.settings.ai.prompts[level] =
-            normalizeLocalAiPrompt(value, DEFAULT_LOCAL_AI_PROMPTS[level]);
-          await this.plugin.saveSettings();
-        });
-      textarea.inputEl.addClass("journaling-system-ai-prompt-textarea");
-    });
-    setting.addButton((button) => {
-      button
-        .setButtonText("Reset")
-        .setTooltip("Reset to default prompt")
-        .onClick(async () => {
+    this.addFullWidthTextAreaSetting(
+      containerEl,
+      `${capitalize(level)} AI prompt`,
+      `Prompt template for ${level} AI review guidance.`,
+      this.plugin.settings.ai.prompts[level],
+      async (value) => {
+        this.plugin.settings.ai.prompts[level] = normalizeLocalAiPrompt(
+          value,
+          DEFAULT_LOCAL_AI_PROMPTS[level]
+        );
+        await this.plugin.saveSettings();
+      },
+      {
+        textareaClass: "journaling-system-ai-prompt-textarea",
+        resetLabel: "Reset",
+        resetTooltip: "Reset to default prompt",
+        onReset: async () => {
           this.plugin.settings.ai.prompts[level] = DEFAULT_LOCAL_AI_PROMPTS[level];
           await this.plugin.saveSettings();
           this.display();
-        });
-    });
+        },
+      }
+    );
   }
 
   private displayAppearanceSettings(containerEl: HTMLElement): void {
@@ -4215,19 +4211,76 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     label: string,
     level: ReviewLevel
   ): void {
-    new Setting(containerEl)
-      .setName(`${label} checklist prompts`)
-      .setDesc("One process item per line. Property fill-in items are added automatically.")
-      .addTextArea((textarea) => {
-        textarea
-          .setValue(this.plugin.settings.reviews.checklistItems[level].join("\n"))
-          .onChange(async (value) => {
-            this.plugin.settings.reviews.checklistItems[level] =
-              normalizeChecklistItems(value);
-            await this.plugin.saveSettings();
-          });
-        textarea.inputEl.addClass("journaling-system-checklist-textarea");
+    this.addFullWidthTextAreaSetting(
+      containerEl,
+      `${label} checklist prompts`,
+      "One process item per line. Property fill-in items are added automatically.",
+      this.plugin.settings.reviews.checklistItems[level].join("\n"),
+      async (value) => {
+        this.plugin.settings.reviews.checklistItems[level] = normalizeChecklistItems(value);
+        await this.plugin.saveSettings();
+      },
+      {
+        textareaClass: "journaling-system-checklist-textarea",
+      }
+    );
+  }
+
+  private addFullWidthTextAreaSetting(
+    containerEl: HTMLElement,
+    name: string,
+    description: string,
+    value: string,
+    onChange: (value: string) => Promise<void>,
+    options?: {
+      textareaClass?: string;
+      resetLabel?: string;
+      resetTooltip?: string;
+      onReset?: () => Promise<void>;
+      placeholder?: string;
+    }
+  ): void {
+    const settingContainer = containerEl.createDiv({
+      cls: "journaling-system-full-width-textarea-setting",
+    });
+
+    const setting = new Setting(settingContainer)
+      .setName(name)
+      .setDesc(description);
+
+    const textarea = settingContainer.createEl("textarea", {
+      cls: options?.textareaClass ?? "journaling-system-textarea",
+    });
+    textarea.value = value;
+    textarea.placeholder = options?.placeholder ?? "";
+
+    textarea.addEventListener("input", async () => {
+      await onChange(textarea.value);
+    });
+
+    if (options?.resetLabel && options?.onReset) {
+      const actions = settingContainer.createDiv({
+        cls: "journaling-system-full-width-textarea-actions",
       });
+      const resetButton = new ButtonComponent(actions)
+        .setButtonText(options.resetLabel)
+        .setTooltip(options.resetTooltip ?? options.resetLabel)
+        .onClick(async () => {
+          await options.onReset?.();
+        });
+      resetButton.setCta();
+    }
+
+    const textareaSettingClass = "journaling-system-full-width-textarea-item";
+    setting.settingEl.classList.add(textareaSettingClass);
+    if (setting.descEl) {
+      setting.descEl.style.gridColumn = "1 / -1";
+    }
+
+    // Prevent the default action row from reserving horizontal space for controls.
+    if (!options?.resetLabel || !options?.onReset) {
+      setting.controlEl.empty();
+    }
   }
 
   private renderReviewPropertyRow(

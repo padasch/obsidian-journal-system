@@ -192,13 +192,36 @@
 .journaling-system-checklist-textarea {
   min-height: 96px;
   resize: vertical;
-  width: min(420px, 100%);
+  width: 100%;
 }
 
 .journaling-system-ai-prompt-textarea {
   min-height: 220px;
   resize: vertical;
-  width: min(680px, 100%);
+  width: 100%;
+}
+
+.journaling-system-full-width-textarea-setting {
+  display: grid;
+  gap: 8px;
+}
+
+.journaling-system-full-width-textarea-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
+.journaling-system-full-width-textarea-item .setting-item {
+  display: block;
+}
+
+.journaling-system-full-width-textarea-item .setting-item-control {
+  display: none;
+}
+
+.journaling-system-full-width-textarea-setting textarea {
+  margin-top: 4px;
 }
 
 .journaling-system-remove-property:disabled {
