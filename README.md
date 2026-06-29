@@ -109,6 +109,7 @@ the parsed folder underneath the setting.
 - `Journaling System: Open long journal entry`
 - `Journaling System: Open weekly review`
 - `Journaling System: Start weekly review wizard`
+- `Journaling System: Choose review period`
 - `Journaling System: Open monthly review`
 - `Journaling System: Open annual review`
 
@@ -155,6 +156,10 @@ textarea, where it can be changed before saving. The summary is saved to
 started from AI. Local AI prompt templates support `{{sourceNotes}}` as the
 insertion point for review context and `{{aspects}}` for the configured aspect
 list; if omitted, the missing sections are appended automatically.
+
+Use `Choose review period` to open the current period or either of the previous
+two weeks, months, or years. Weekly period rows can also start the weekly review
+wizard for that selected week.
 
 Review Base columns can be selected separately for daily-source Bases and
 review-source Bases, with an optional column-width field for each property. Default

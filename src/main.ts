@@ -644,6 +644,14 @@ export default class JournalingSystemPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "choose-review-period",
+      name: "Choose review period",
+      callback: () => {
+        new ReviewPeriodSelectionModal(this.app, this).open();
+      },
+    });
+
+    this.addCommand({
       id: "open-monthly-review",
       name: "Open monthly review",
       callback: async () => {
@@ -927,8 +935,8 @@ export default class JournalingSystemPlugin extends Plugin {
     await this.openFileAtHeading(file, this.settings.dailyNote.longEntryHeading);
   }
 
-  async openReview(level: ReviewLevel): Promise<void> {
-    const file = await this.getOrCreateReviewNote(level);
+  async openReview(level: ReviewLevel, now = moment()): Promise<void> {
+    const file = await this.getOrCreateReviewNote(level, now);
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.openFile(file, { active: true });
     new Notice(`Opened ${level} review.`);
@@ -2296,6 +2304,65 @@ class ReviewPromptDecisionModal extends Modal {
   }
 }
 
+class ReviewPeriodSelectionModal extends Modal {
+  constructor(app: App, private readonly plugin: JournalingSystemPlugin) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass("journaling-system-modal-shell");
+    applyModalAppearance(this.modalEl, this.plugin.settings);
+    this.contentEl.addClass("journaling-system-modal");
+    this.contentEl.empty();
+    this.setTitle("Choose review period");
+
+    this.contentEl.createDiv({
+      cls: "journaling-system-field-hint",
+      text: "Choose the current period or one of the previous two periods.",
+    });
+
+    for (const level of REVIEW_LEVELS) {
+      this.renderLevel(level);
+    }
+  }
+
+  private renderLevel(level: ReviewLevel): void {
+    this.contentEl.createEl("h3", { text: `${capitalize(level)} reviews` });
+    const options = getRecentReviewPeriodOptions(level);
+
+    for (const option of options) {
+      const setting = new Setting(this.contentEl)
+        .setName(option.label)
+        .setDesc(option.description);
+
+      setting.addButton((button) => {
+        button
+          .setButtonText("Open review")
+          .onClick(async () => {
+            this.close();
+            await this.plugin.openReview(level, option.date);
+          });
+      });
+
+      if (level === "weekly") {
+        setting.addButton((button) => {
+          button
+            .setButtonText("Start wizard")
+            .setCta()
+            .onClick(() => {
+              this.close();
+              new WeeklyReviewWizardModal(this.app, this.plugin, option.date).open();
+            });
+        });
+      }
+    }
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
 class WeeklyReviewWizardModal extends Modal {
   private reviewFile: TFile | null = null;
   private properties: ReviewPropertyDefinition[] = [];
@@ -2307,9 +2374,15 @@ class WeeklyReviewWizardModal extends Modal {
   private summaryText = "";
   private summaryStartedFromAi = false;
   private aiSummaryBusy = false;
+  private readonly reviewDate: Moment;
 
-  constructor(app: App, private readonly plugin: JournalingSystemPlugin) {
+  constructor(
+    app: App,
+    private readonly plugin: JournalingSystemPlugin,
+    reviewDate: Moment = moment()
+  ) {
     super(app);
+    this.reviewDate = reviewDate.clone();
   }
 
   onOpen(): void {
@@ -2320,7 +2393,7 @@ class WeeklyReviewWizardModal extends Modal {
     this.modalEl.addClass("journaling-system-modal-shell");
     applyModalAppearance(this.modalEl, this.plugin.settings);
     this.contentEl.addClass("journaling-system-modal");
-    this.setTitle("Weekly review wizard");
+    this.setTitle(`Weekly review wizard - ${formatReviewPeriodTitle("weekly", this.reviewDate)}`);
     this.contentEl.empty();
     this.contentEl.createDiv({
       cls: "journaling-system-field-hint",
@@ -2328,9 +2401,9 @@ class WeeklyReviewWizardModal extends Modal {
     });
 
     try {
-      this.reviewFile = await this.plugin.getOrCreateReviewNote("weekly");
+      this.reviewFile = await this.plugin.getOrCreateReviewNote("weekly", this.reviewDate);
       this.properties = this.plugin.getReviewWizardProperties("weekly");
-      this.dailySummary = await this.plugin.getDailyReviewSummary("weekly");
+      this.dailySummary = await this.plugin.getDailyReviewSummary("weekly", this.reviewDate);
       const frontmatter = this.app.metadataCache.getFileCache(this.reviewFile)?.frontmatter;
       this.initialFrontmatter = isRecord(frontmatter) ? { ...frontmatter } : {};
       this.summaryStartedFromAi = isTruthyFrontmatterValue(
@@ -2370,7 +2443,9 @@ class WeeklyReviewWizardModal extends Modal {
 
     this.currentInput = null;
     this.contentEl.empty();
-    this.setTitle(`Weekly review wizard (${this.stepIndex + 1}/${this.properties.length})`);
+    this.setTitle(
+      `Weekly review wizard - ${formatReviewPeriodTitle("weekly", this.reviewDate)} (${this.stepIndex + 1}/${this.properties.length})`
+    );
 
     this.renderDailyContext(this.contentEl);
     this.renderReviewSummary(this.contentEl);
@@ -2434,7 +2509,7 @@ class WeeklyReviewWizardModal extends Modal {
   private renderSummaryOnlyStep(): void {
     this.currentInput = null;
     this.contentEl.empty();
-    this.setTitle("Weekly review wizard");
+    this.setTitle(`Weekly review wizard - ${formatReviewPeriodTitle("weekly", this.reviewDate)}`);
     this.renderDailyContext(this.contentEl);
     this.renderReviewSummary(this.contentEl);
 
@@ -4992,6 +5067,76 @@ function getAvailableBasePropertiesFromSettings(
 
 function reviewPeriodLabel(level: ReviewLevel): string {
   return level === "weekly" ? "week" : level === "monthly" ? "month" : "year";
+}
+
+function getRecentReviewPeriodOptions(
+  level: ReviewLevel,
+  reference = moment(),
+  count = 3
+): Array<{ date: Moment; label: string; description: string }> {
+  return Array.from({ length: count }, (_, offset) => {
+    const date = getReviewPeriodDate(level, reference, offset);
+    return {
+      date,
+      label: getReviewPeriodOptionLabel(level, offset),
+      description: formatReviewPeriodDescription(level, date),
+    };
+  });
+}
+
+function getReviewPeriodDate(
+  level: ReviewLevel,
+  reference: Moment,
+  offset: number
+): Moment {
+  const date = reference.clone();
+  if (level === "weekly") {
+    return date.subtract(offset, "weeks");
+  }
+
+  if (level === "monthly") {
+    return date.subtract(offset, "months");
+  }
+
+  return date.subtract(offset, "years");
+}
+
+function getReviewPeriodOptionLabel(level: ReviewLevel, offset: number): string {
+  if (offset === 0) {
+    return `This ${reviewPeriodLabel(level)}`;
+  }
+
+  if (offset === 1) {
+    return `Last ${reviewPeriodLabel(level)}`;
+  }
+
+  return `${offset} ${reviewPeriodLabel(level)}s ago`;
+}
+
+function formatReviewPeriodTitle(level: ReviewLevel, date: Moment): string {
+  if (level === "weekly") {
+    return date.format("GGGG-[W]WW");
+  }
+
+  if (level === "monthly") {
+    return date.format("MMMM YYYY");
+  }
+
+  return date.format("YYYY");
+}
+
+function formatReviewPeriodDescription(level: ReviewLevel, date: Moment): string {
+  if (level === "weekly") {
+    const start = date.clone().startOf("isoWeek").format("YYYY-MM-DD");
+    const end = date.clone().endOf("isoWeek").format("YYYY-MM-DD");
+    return `${formatReviewPeriodTitle(level, date)} · ${start} to ${end}`;
+  }
+
+  if (level === "monthly") {
+    return `${date.format("YYYY-MM")} · ${date.format("MMMM YYYY")}`;
+  }
+
+  return date.format("YYYY");
 }
 
 function toFrontmatterValue(
