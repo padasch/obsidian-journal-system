@@ -3237,6 +3237,19 @@ function createJournalInput(
   collectScope: TopicSuggestionScope = "daily"
 ): JournalFieldInput {
   if (definition.type === "text") {
+    if (definition.role === "location") {
+      const existingValues = plugin.collectExistingValues(definition.property, collectScope);
+      const locationInput = new FuzzyTextPropertyInput(
+        fieldEl,
+        existingValues,
+        definition.placeholder || "Where are you?",
+        formatInitialTextValue(initialValue)
+      );
+      return {
+        getValue: () => locationInput.getValue(),
+      };
+    }
+
     const input =
       definition.role === "short"
         ? fieldEl.createEl("textarea", { cls: "journaling-system-textarea" })
@@ -3308,6 +3321,67 @@ function createJournalInput(
     getValues: () => multiInput.getValues(),
     addValues: (values: string[]) => multiInput.addValues(values),
   };
+}
+
+class FuzzyTextPropertyInput {
+  private readonly inputEl: HTMLInputElement;
+  private readonly suggestionsEl: HTMLElement;
+
+  constructor(
+    containerEl: HTMLElement,
+    private readonly existingValues: string[],
+    placeholder: string,
+    initialValue: string
+  ) {
+    const wrapper = containerEl.createDiv({ cls: "journaling-system-multiselect" });
+    this.inputEl = wrapper.createEl("input", {
+      type: "text",
+      cls: "journaling-system-input",
+    });
+    this.inputEl.placeholder = placeholder;
+    this.inputEl.value = initialValue;
+    this.suggestionsEl = wrapper.createDiv({ cls: "journaling-system-suggestions" });
+
+    this.inputEl.addEventListener("input", () => this.renderSuggestions());
+    this.inputEl.addEventListener("keyup", () => this.renderSuggestions());
+    this.inputEl.addEventListener("focus", () => this.renderSuggestions());
+    this.inputEl.addEventListener("blur", () => {
+      window.setTimeout(() => this.suggestionsEl.empty(), 120);
+    });
+  }
+
+  getValue(): string {
+    return this.inputEl.value.trim();
+  }
+
+  private renderSuggestions(): void {
+    this.suggestionsEl.empty();
+    const query = this.inputEl.value.trim();
+
+    if (query.length === 0) {
+      return;
+    }
+
+    const suggestions = this.existingValues
+      .filter((value) => value.toLowerCase() !== query.toLowerCase())
+      .map((value) => ({ value, score: fuzzyScore(value, query) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score || a.value.localeCompare(b.value))
+      .slice(0, 8);
+
+    for (const { value } of suggestions) {
+      const button = this.suggestionsEl.createEl("button", {
+        text: value,
+        cls: "journaling-system-suggestion",
+      });
+      button.type = "button";
+      button.addEventListener("click", () => {
+        this.inputEl.value = value;
+        this.suggestionsEl.empty();
+        this.inputEl.focus();
+      });
+    }
+  }
 }
 
 class MultiSelectPropertyInput {
