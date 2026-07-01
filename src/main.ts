@@ -124,6 +124,8 @@ interface JournalingSystemSettings {
       promptTime: string;
       noteNameFormat: string;
       lastPromptKey: string;
+      snoozeDays: number;
+      snoozedUntil: number;
     };
     monthly: {
       enabled: boolean;
@@ -131,6 +133,8 @@ interface JournalingSystemSettings {
       promptTime: string;
       noteNameFormat: string;
       lastPromptKey: string;
+      snoozeDays: number;
+      snoozedUntil: number;
     };
     annual: {
       enabled: boolean;
@@ -138,6 +142,8 @@ interface JournalingSystemSettings {
       promptTime: string;
       noteNameFormat: string;
       lastPromptKey: string;
+      snoozeDays: number;
+      snoozedUntil: number;
     };
     folder: string;
     rollupSource: RollupSource;
@@ -219,6 +225,22 @@ const WEEKDAY_LABELS: Record<Weekday, string> = {
   saturday: "Saturday",
   sunday: "Sunday",
 };
+const WEEKDAY_TO_MOMENT_DAY: Record<Weekday, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+const WEEKDAYS_SET = new Set<Weekday>(WEEKDAYS);
+
+function normalizeWeekday(value: unknown, fallback: Weekday): Weekday {
+  return typeof value === "string" && WEEKDAYS_SET.has(value as Weekday)
+    ? (value as Weekday)
+    : fallback;
+}
 
 const PROPERTY_TYPE_LABELS: Record<JournalPropertyType, string> = {
   text: "Text",
@@ -574,6 +596,8 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
       promptTime: "18:00",
       noteNameFormat: "YYYY - [Week] WW",
       lastPromptKey: "",
+      snoozeDays: 1,
+      snoozedUntil: 0,
     },
     monthly: {
       enabled: true,
@@ -581,6 +605,8 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
       promptTime: "18:00",
       noteNameFormat: "YYYY-MM MMMM",
       lastPromptKey: "",
+      snoozeDays: 1,
+      snoozedUntil: 0,
     },
     annual: {
       enabled: true,
@@ -588,6 +614,8 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
       promptTime: "18:00",
       noteNameFormat: "YYYY [Annual Review]",
       lastPromptKey: "",
+      snoozeDays: 1,
+      snoozedUntil: 0,
     },
     folder: "",
     rollupSource: "hybrid-hierarchy",
@@ -723,6 +751,30 @@ export default class JournalingSystemPlugin extends Plugin {
       name: "Open annual review",
       callback: async () => {
         await this.openReview("annual");
+      },
+    });
+
+    this.addCommand({
+      id: "snooze-weekly-review-prompt",
+      name: "Snooze weekly review prompt",
+      callback: async () => {
+        await this.snoozeReviewPrompt("weekly");
+      },
+    });
+
+    this.addCommand({
+      id: "snooze-monthly-review-prompt",
+      name: "Snooze monthly review prompt",
+      callback: async () => {
+        await this.snoozeReviewPrompt("monthly");
+      },
+    });
+
+    this.addCommand({
+      id: "snooze-annual-review-prompt",
+      name: "Snooze annual review prompt",
+      callback: async () => {
+        await this.snoozeReviewPrompt("annual");
       },
     });
 
@@ -995,25 +1047,32 @@ export default class JournalingSystemPlugin extends Plugin {
   async checkReviewPrompts(now = moment()): Promise<void> {
     const reviews = this.settings.reviews;
     const currentTime = now.format("HH:mm");
+    const weekday = now.format("dddd").toLowerCase() as Weekday;
 
     if (
       reviews.weekly.enabled &&
+      reviews.weekly.snoozedUntil <= Date.now() &&
       reviews.weekly.promptTime === currentTime &&
-      reviews.weekly.promptWeekday === (now.format("dddd").toLowerCase() as Weekday)
+      reviews.weekly.promptWeekday === weekday
     ) {
       await this.maybeOpenReviewPrompt("weekly", now);
     }
 
     if (
       reviews.monthly.enabled &&
+      reviews.monthly.snoozedUntil <= Date.now() &&
       reviews.monthly.promptTime === currentTime &&
-      reviews.monthly.promptDayOfMonth === now.date()
+      now.isSame(
+        getFirstWeekdayOfMonth(now, reviews.weekly.promptWeekday),
+        "day"
+      )
     ) {
       await this.maybeOpenReviewPrompt("monthly", now);
     }
 
     if (
       reviews.annual.enabled &&
+      reviews.annual.snoozedUntil <= Date.now() &&
       reviews.annual.promptTime === currentTime &&
       reviews.annual.promptMonthDay === now.format("MM-DD")
     ) {
@@ -1039,6 +1098,15 @@ export default class JournalingSystemPlugin extends Plugin {
       Date.now() + this.settings.dailyPrompts.snoozeMinutes * 60_000;
     await this.saveSettings();
     new Notice(`Journaling prompt snoozed for ${this.settings.dailyPrompts.snoozeMinutes} minutes.`);
+  }
+
+  async snoozeReviewPrompt(level: ReviewLevel): Promise<void> {
+    const reviewSettings = this.settings.reviews[level];
+    const snoozeDays = Math.max(1, reviewSettings.snoozeDays);
+    reviewSettings.snoozedUntil =
+      Date.now() + snoozeDays * 24 * 60 * 60 * 1000;
+    await this.saveSettings();
+    new Notice(`Review prompt snoozed for ${snoozeDays} ${snoozeDays === 1 ? "day" : "days"}.`);
   }
 
   async saveJournal(values: JournalValue[]): Promise<TFile> {
@@ -2657,6 +2725,9 @@ class ReviewPromptDecisionModal extends Modal {
     this.contentEl.empty();
     this.setTitle(`${capitalize(this.level)} review`);
     this.contentEl.createEl("p", { text: "Open the review note now?" });
+    const snoozeDays = this.plugin.settings.reviews[this.level].snoozeDays;
+    const snoozeLabel =
+      snoozeDays <= 0 ? "Snooze" : `Snooze for ${snoozeDays} ${snoozeDays === 1 ? "day" : "days"}`;
 
     new Setting(this.contentEl)
       .addButton((button) => {
@@ -2667,6 +2738,12 @@ class ReviewPromptDecisionModal extends Modal {
             this.close();
             await this.plugin.openReview(this.level);
           });
+      })
+      .addButton((button) => {
+        button.setButtonText(snoozeLabel).onClick(async () => {
+          this.close();
+          await this.plugin.snoozeReviewPrompt(this.level);
+        });
       });
   }
 
@@ -4232,21 +4309,12 @@ class JournalingSystemSettingTab extends PluginSettingTab {
     }
 
     if (level === "monthly") {
+      const monthlyDescription = `Monthly review uses the first ${
+        WEEKDAY_LABELS[this.plugin.settings.reviews.weekly.promptWeekday]
+      } of each month.`;
       new Setting(section)
-        .setName("Prompt day of month")
-        .setDesc("Calendar day when the monthly review prompt should appear, from 1 to 31.")
-        .addText((text) => {
-          text.inputEl.type = "number";
-          text.setValue(String(this.plugin.settings.reviews.monthly.promptDayOfMonth));
-          text.onChange(async (value) => {
-            this.plugin.settings.reviews.monthly.promptDayOfMonth = clamp(
-              parseInteger(value, 1),
-              1,
-              31
-            );
-            await this.plugin.saveSettings();
-          });
-        });
+        .setName("Prompt weekday (derived)")
+        .setDesc(monthlyDescription);
     }
 
     if (level === "annual") {
@@ -4261,6 +4329,18 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           });
         });
     }
+
+    new Setting(section)
+      .setName("Snooze days")
+      .setDesc(`Delay this ${label.toLowerCase()} prompt for this many days if you snooze it.`)
+      .addText((text) => {
+        text.inputEl.type = "number";
+        text.setValue(String(review.snoozeDays));
+        text.onChange(async (value) => {
+          review.snoozeDays = clamp(parseInteger(value, 1), 1, 365);
+          await this.plugin.saveSettings();
+        });
+      });
 
     new Setting(section)
       .setName("Prompt time")
@@ -5385,6 +5465,10 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   settings.dailyPrompts.promptBehavior = normalizeDailyPromptBehavior(
     settings.dailyPrompts.promptBehavior
   );
+  settings.reviews.weekly.promptWeekday = normalizeWeekday(
+    settings.reviews.weekly.promptWeekday,
+    DEFAULT_SETTINGS.reviews.weekly.promptWeekday
+  );
   settings.properties = normalizePropertyDefinitions(settings.properties);
   settings.reviews.baseProperties = normalizeDailyBaseProperties(
     settings.reviews.baseProperties
@@ -5411,6 +5495,27 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   settings.reviews.reviewProperties = normalizeReviewPropertyDefinitions(
     settings.reviews.reviewProperties
   );
+  settings.reviews.weekly.snoozeDays = normalizeReviewSnoozeDays(
+    settings.reviews.weekly.snoozeDays
+  );
+  settings.reviews.monthly.snoozeDays = normalizeReviewSnoozeDays(
+    settings.reviews.monthly.snoozeDays
+  );
+  settings.reviews.annual.snoozeDays = normalizeReviewSnoozeDays(
+    settings.reviews.annual.snoozeDays
+  );
+  settings.reviews.weekly.snoozedUntil =
+    typeof settings.reviews.weekly.snoozedUntil === "number"
+      ? settings.reviews.weekly.snoozedUntil
+      : 0;
+  settings.reviews.monthly.snoozedUntil =
+    typeof settings.reviews.monthly.snoozedUntil === "number"
+      ? settings.reviews.monthly.snoozedUntil
+      : 0;
+  settings.reviews.annual.snoozedUntil =
+    typeof settings.reviews.annual.snoozedUntil === "number"
+      ? settings.reviews.annual.snoozedUntil
+      : 0;
   settings.reviews.topicSuggestionFolders = normalizeTopicSuggestionFolders(
     settings.reviews.topicSuggestionFolders
   );
@@ -6203,6 +6308,12 @@ function getReviewPeriodDate(
   return date.subtract(offset, "years");
 }
 
+function getFirstWeekdayOfMonth(reference: Moment, weekday: Weekday): Moment {
+  const firstDayOfMonth = reference.clone().startOf("month");
+  const offsetDays = (WEEKDAY_TO_MOMENT_DAY[weekday] - firstDayOfMonth.day() + 7) % 7;
+  return firstDayOfMonth.add(offsetDays, "days");
+}
+
 function getReviewPeriodOptionLabel(level: ReviewLevel, offset: number): string {
   if (offset === 0) {
     return `This ${reviewPeriodLabel(level)}`;
@@ -6980,6 +7091,17 @@ function findLatestDuePromptTime(times: string[], currentTime: string): string |
     .sort();
 
   return dueTimes.length > 0 ? dueTimes[dueTimes.length - 1] : null;
+}
+
+function normalizeReviewSnoozeDays(value: unknown): number {
+  const cleanValue =
+    typeof value === "number" && Number.isFinite(value)
+      ? value
+      : typeof value === "string"
+      ? Number.parseInt(value, 10)
+      : NaN;
+
+  return clamp(Number.isFinite(cleanValue) ? cleanValue : 1, 1, 365);
 }
 
 function parseInteger(value: string, fallback: number): number {

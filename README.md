@@ -87,7 +87,8 @@ scannable as options grow.
   appear or only appear when today's quick entry is empty, and daily note
   creation. Weekly, monthly, and annual settings control the review prompt
   schedule, review note name format, checklist prompts, and whether that level
-  embeds daily long entries.
+  embeds daily long entries. Monthly prompts are now scheduled for the first
+  occurrence of the configured weekly weekday in each month.
 - Local AI settings connect to Ollama on localhost only. The plugin can check the
   server, probe common local Ollama endpoints, explicitly ask Ollama to download
   the configured model, and insert weekly guidance into `journalSummary`.
@@ -116,6 +117,9 @@ the parsed folder underneath the setting.
 - `Journaling System: Choose review period`
 - `Journaling System: Open monthly review`
 - `Journaling System: Open annual review`
+- `Journaling System: Snooze weekly review prompt`
+- `Journaling System: Snooze monthly review prompt`
+- `Journaling System: Snooze annual review prompt`
 
 Multi-select fields suggest existing values already used for the configured property
 name and rank them with lightweight fuzzy matching. Enter multiple values by putting
