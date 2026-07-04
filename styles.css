@@ -397,6 +397,50 @@
   white-space: pre-wrap;
 }
 
+.journaling-system-daily-review-context {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin-top: 14px;
+  padding: 8px 10px;
+}
+
+.journaling-system-daily-review-context-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.journaling-system-daily-review-item {
+  align-items: start;
+  border-top: 1px solid var(--background-modifier-border);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-top: 8px;
+}
+
+.journaling-system-daily-review-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.journaling-system-daily-review-item-title {
+  color: var(--text-muted);
+  font-size: calc(var(--journaling-system-modal-font-size) - 2px);
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.journaling-system-daily-review-item-summary {
+  white-space: pre-wrap;
+}
+
+.journaling-system-daily-review-item-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .journaling-system-ai-summary {
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
@@ -579,6 +623,14 @@
 
   .journaling-system-review-wizard-context-body {
     max-height: 160px;
+  }
+
+  .journaling-system-daily-review-item {
+    grid-template-columns: 1fr;
+  }
+
+  .journaling-system-daily-review-item-actions {
+    justify-content: flex-start;
   }
 
   .journaling-system-weekday-row,

@@ -29,6 +29,8 @@ long-form journal heading.
 - Try a weekly review wizard that shows concise daily context, offers an editable
   summary, can generate a local AI draft, steps through enabled review
   properties, then opens the review note for further writing.
+- Show a collapsed daily reminder panel with the latest completed weekly,
+  monthly, and annual review summaries.
 
 ## Review philosophy
 
@@ -84,11 +86,12 @@ scannable as options grow.
   Review Fields Base and source-note Bases. Select which properties should be
   visible and optionally set column widths for fields that need more room.
 - Daily settings control prompt schedule, whether scheduled prompts always
-  appear or only appear when today's quick entry is empty, and daily note
-  creation. Weekly, monthly, and annual settings control the review prompt
-  schedule, review note name format, checklist prompts, and whether that level
-  embeds daily long entries. Monthly prompts are now scheduled for the first
-  occurrence of the configured weekly weekday in each month.
+  appear or only appear when today's quick entry is empty, daily note creation,
+  and the optional review reminder panel. Weekly, monthly, and annual settings
+  control the review prompt schedule, review note name format, checklist prompts,
+  and whether that level embeds daily long entries. Monthly prompts are now
+  scheduled for the first occurrence of the configured weekly weekday in each
+  month.
 - Local AI settings connect to Ollama on localhost only. The plugin can check the
   server, probe common local Ollama endpoints, explicitly ask Ollama to download
   the configured model, and insert weekly guidance into `journalSummary`.
@@ -111,7 +114,9 @@ the parsed folder underneath the setting.
 ## Current commands
 
 - `Journaling System: Open daily journal prompt`
+- `Journaling System: Open yesterday's daily journal prompt`
 - `Journaling System: Open long journal entry`
+- `Journaling System: Open yesterday's long journal entry`
 - `Journaling System: Open weekly review`
 - `Journaling System: Start weekly review wizard`
 - `Journaling System: Choose review period`
@@ -130,6 +135,17 @@ properties, existing values are prefilled so the entry can be continued or edite
 Scheduled daily prompts can be set to always ask, or to ask only when the current
 daily note has no quick entry yet. The command `Open daily journal prompt` remains
 manual and always opens the modal.
+
+Use `Open yesterday's daily journal prompt` or `Open yesterday's long journal
+entry` when writing after midnight but saving the entry to the previous day's
+daily note. Scheduled prompt popups also include a `Journal yesterday` action.
+
+The daily prompt can also show a collapsed Review reminders panel below the daily
+fields. The panel reads existing review-note frontmatter, shows the latest
+completed weekly, monthly, and annual review summaries, and falls back to
+`journalSummary` or legacy `journalAISummary` values when needed. It is enabled
+on desktop by default and hidden on mobile by default. The panel never creates or
+refreshes review notes.
 
 Daily and review notes receive `journalType` frontmatter. Daily notes also receive
 period keys such as `journalWeek`, `journalMonth`, and `journalYear`. Notes also

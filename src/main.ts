@@ -7,6 +7,7 @@ import {
   Notice,
   Plugin,
   PluginSettingTab,
+  Platform,
   requestUrl,
   Setting,
   TAbstractFile,
@@ -55,6 +56,12 @@ interface LocalAiSettings {
   prompts: Record<ReviewLevel, string>;
 }
 
+interface DailyReviewContextSettings {
+  enabled: boolean;
+  showOnDesktop: boolean;
+  showOnMobile: boolean;
+}
+
 interface JournalPropertyDefinition {
   id: string;
   enabled: boolean;
@@ -98,6 +105,7 @@ interface JournalingSystemSettings {
     promptBehavior: DailyPromptBehavior;
     lastPromptKey: string;
     snoozedUntil: number;
+    reviewContext: DailyReviewContextSettings;
   };
   dailyNote: {
     folder: string;
@@ -195,6 +203,13 @@ interface DailyReviewSummaryItem {
   hasLongEntry: boolean;
 }
 
+interface DailyReviewReminderItem {
+  level: ReviewLevel;
+  label: string;
+  file: TFile;
+  summary: string;
+}
+
 interface NumericPropertySummary {
   label: string;
   count: number;
@@ -203,8 +218,12 @@ interface NumericPropertySummary {
   max: number;
 }
 
-const SETTINGS_SCHEMA_VERSION = 12;
+const SETTINGS_SCHEMA_VERSION = 13;
 const moment = obsidianMoment as unknown as () => Moment;
+
+function getYesterday(): Moment {
+  return moment().subtract(1, "day");
+}
 
 const WEEKDAYS: Weekday[] = [
   "monday",
@@ -570,6 +589,11 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     promptBehavior: "always",
     lastPromptKey: "",
     snoozedUntil: 0,
+    reviewContext: {
+      enabled: true,
+      showOnDesktop: true,
+      showOnMobile: false,
+    },
   },
   dailyNote: {
     folder: "",
@@ -667,10 +691,26 @@ export default class JournalingSystemPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "open-yesterday-journaling-prompt",
+      name: "Open yesterday's daily journal prompt",
+      callback: () => {
+        new JournalingPromptModal(this.app, this, getYesterday()).open();
+      },
+    });
+
+    this.addCommand({
       id: "open-long-journal-entry",
       name: "Open long journal entry",
       callback: async () => {
         await this.openLongJournalEntry([]);
+      },
+    });
+
+    this.addCommand({
+      id: "open-yesterday-long-journal-entry",
+      name: "Open yesterday's long journal entry",
+      callback: async () => {
+        await this.openLongJournalEntry([], getYesterday());
       },
     });
 
@@ -1109,19 +1149,22 @@ export default class JournalingSystemPlugin extends Plugin {
     new Notice(`Review prompt snoozed for ${snoozeDays} ${snoozeDays === 1 ? "day" : "days"}.`);
   }
 
-  async saveJournal(values: JournalValue[]): Promise<TFile> {
-    const file = await this.getOrCreateDailyNote();
-    await this.writeJournalProperties(file, values);
-    await this.appendShortCapture(file, values);
+  async saveJournal(values: JournalValue[], now = moment()): Promise<TFile> {
+    const file = await this.getOrCreateDailyNote(now);
+    await this.writeJournalProperties(file, values, now);
+    await this.appendShortCapture(file, values, now);
     await this.syncPictureStatus(file);
     return file;
   }
 
-  async openLongJournalEntry(values: JournalValue[]): Promise<void> {
-    const file = await this.saveJournal([
-      ...values,
-      { definition: this.getLongProperty(), value: true },
-    ]);
+  async openLongJournalEntry(values: JournalValue[], now = moment()): Promise<void> {
+    const file = await this.saveJournal(
+      [
+        ...values,
+        { definition: this.getLongProperty(), value: true },
+      ],
+      now
+    );
     await this.ensureLongEntrySection(file);
     await this.openFileAtHeading(file, this.settings.dailyNote.longEntryHeading);
   }
@@ -1261,8 +1304,11 @@ export default class JournalingSystemPlugin extends Plugin {
     return `${formatFrontmatterBlock(this.getReviewFrontmatter(level, now))}${lines.join("\n")}`;
   }
 
-  async writeJournalProperties(file: TFile, values: JournalValue[]): Promise<void> {
-    const now = moment();
+  async writeJournalProperties(
+    file: TFile,
+    values: JournalValue[],
+    now = moment()
+  ): Promise<void> {
     const context = this.getTodayContext(now);
     const automaticFrontmatter = this.getAutomaticFrontmatter("daily", now);
 
@@ -2192,6 +2238,89 @@ export default class JournalingSystemPlugin extends Plugin {
     return items;
   }
 
+  shouldShowDailyReviewContext(): boolean {
+    const settings = this.settings.dailyPrompts.reviewContext;
+    if (!settings.enabled) {
+      return false;
+    }
+
+    if (Platform.isMobileApp || Platform.isMobile) {
+      return settings.showOnMobile;
+    }
+
+    return settings.showOnDesktop;
+  }
+
+  getDailyReviewReminderItems(now = moment()): DailyReviewReminderItem[] {
+    if (!this.shouldShowDailyReviewContext()) {
+      return [];
+    }
+
+    return REVIEW_LEVELS.map((level) =>
+      this.getLatestCompletedReviewReminder(level, now)
+    ).filter((item): item is DailyReviewReminderItem => item !== null);
+  }
+
+  private getLatestCompletedReviewReminder(
+    level: ReviewLevel,
+    now = moment()
+  ): DailyReviewReminderItem | null {
+    const automatic = this.settings.automaticProperties;
+    const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
+    const dateProperty = automatic.date.trim() || DEFAULT_SETTINGS.automaticProperties.date;
+    const summaryProperty = this.getAiSummaryProperty();
+    const today = now.clone().endOf("day");
+
+    const candidates = this.app.vault
+      .getMarkdownFiles()
+      .map((file) => {
+        const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+        const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+        if (String(frontmatterRecord[typeProperty] ?? "") !== level) {
+          return null;
+        }
+
+        const reviewDate = getJournalMoment(file, frontmatterRecord, dateProperty);
+        if (!reviewDate?.isValid() || reviewDate.isAfter(today)) {
+          return null;
+        }
+
+        const summary = getReviewReminderSummary(frontmatterRecord, summaryProperty);
+        if (summary.length === 0) {
+          return null;
+        }
+
+        return {
+          file,
+          reviewDate,
+          summary,
+        };
+      })
+      .filter(
+        (
+          candidate
+        ): candidate is { file: TFile; reviewDate: Moment; summary: string } =>
+          candidate !== null
+      )
+      .sort(
+        (a, b) =>
+          b.reviewDate.valueOf() - a.reviewDate.valueOf() ||
+          b.file.path.localeCompare(a.file.path)
+      );
+
+    const latest = candidates[0];
+    if (!latest) {
+      return null;
+    }
+
+    return {
+      level,
+      label: formatReviewPeriodTitle(level, latest.reviewDate),
+      file: latest.file,
+      summary: latest.summary,
+    };
+  }
+
   getReviewProperties(level: ReviewLevel): ReviewPropertyDefinition[] {
     return this.settings.reviews.reviewProperties.filter(
       (property) =>
@@ -2423,7 +2552,11 @@ export default class JournalingSystemPlugin extends Plugin {
     return getAvailableBasePropertiesFromSettings(this.settings, kind);
   }
 
-  async appendShortCapture(file: TFile, values: JournalValue[]): Promise<void> {
+  async appendShortCapture(
+    file: TFile,
+    values: JournalValue[],
+    now = moment()
+  ): Promise<void> {
     const shortDefinition = values.find(({ definition }) => definition.role === "short");
     if (!shortDefinition || typeof shortDefinition.value !== "string") {
       return;
@@ -2440,7 +2573,7 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     const content = await this.app.vault.read(file);
-    const timestamp = moment().format("HH:mm");
+    const timestamp = now.format("HH:mm");
     let updated = content;
     const existingEntries = extractNormalizedCaptureEntries(content, heading);
 
@@ -2645,7 +2778,7 @@ export default class JournalingSystemPlugin extends Plugin {
     return normalizePath(staticSegments.join("/"));
   }
 
-  async getTodayFrontmatter(now = moment()): Promise<Record<string, unknown>> {
+  async getDailyFrontmatter(now = moment()): Promise<Record<string, unknown>> {
     const file = this.app.vault.getFileByPath(this.getDailyNotePath(now));
     if (!file) {
       return {};
@@ -2695,6 +2828,14 @@ class DailyPromptDecisionModal extends Modal {
           .onClick(() => {
             this.close();
             new JournalingPromptModal(this.app, this.plugin).open();
+          });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Journal yesterday")
+          .onClick(() => {
+            this.close();
+            new JournalingPromptModal(this.app, this.plugin, getYesterday()).open();
           });
       })
       .addButton((button) => {
@@ -3185,9 +3326,15 @@ class ReviewWizardModal extends Modal {
 
 class JournalingPromptModal extends Modal {
   private inputs = new Map<string, JournalFieldInput>();
+  private readonly targetDate: Moment;
 
-  constructor(app: App, private readonly plugin: JournalingSystemPlugin) {
+  constructor(
+    app: App,
+    private readonly plugin: JournalingSystemPlugin,
+    targetDate: Moment = moment()
+  ) {
     super(app);
+    this.targetDate = targetDate.clone();
   }
 
   onOpen(): void {
@@ -3201,9 +3348,9 @@ class JournalingPromptModal extends Modal {
     this.modalEl.addClass("journaling-system-modal-shell");
     applyModalAppearance(this.modalEl, this.plugin.settings);
     contentEl.addClass("journaling-system-modal");
-    this.setTitle(`Journal entry for ${moment().format("YYYY-MM-DD dddd")}`);
+    this.setTitle(`Journal entry for ${this.targetDate.format("YYYY-MM-DD dddd")}`);
 
-    const initialFrontmatter = await this.plugin.getTodayFrontmatter();
+    const initialFrontmatter = await this.plugin.getDailyFrontmatter(this.targetDate);
     const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
     const properties = this.plugin
       .getEnabledProperties()
@@ -3226,6 +3373,11 @@ class JournalingPromptModal extends Modal {
       );
       this.inputs.set(definition.id, input);
     }
+
+    this.renderReviewReminders(
+      contentEl,
+      this.plugin.getDailyReviewReminderItems(this.targetDate)
+    );
 
     const buttonRow = contentEl.createDiv({ cls: "journaling-system-modal-actions" });
     new ButtonComponent(buttonRow)
@@ -3250,10 +3402,62 @@ class JournalingPromptModal extends Modal {
       });
   }
 
+  private renderReviewReminders(
+    containerEl: HTMLElement,
+    reminders: DailyReviewReminderItem[]
+  ): void {
+    if (reminders.length === 0) {
+      return;
+    }
+
+    const details = containerEl.createEl("details", {
+      cls: "journaling-system-daily-review-context",
+    });
+    details.createEl("summary", {
+      text: `Review reminders (${reminders.length})`,
+      cls: "journaling-system-review-wizard-summary",
+    });
+
+    const body = details.createDiv({
+      cls: "journaling-system-daily-review-context-body",
+    });
+
+    for (const item of reminders) {
+      const row = body.createDiv({ cls: "journaling-system-daily-review-item" });
+      const content = row.createDiv({
+        cls: "journaling-system-daily-review-item-content",
+      });
+      content.createDiv({
+        cls: "journaling-system-daily-review-item-title",
+        text: `${capitalize(item.level)} · ${item.label}`,
+      });
+      content.createDiv({
+        cls: "journaling-system-daily-review-item-summary",
+        text: truncateText(item.summary, 700),
+      });
+
+      const actions = row.createDiv({
+        cls: "journaling-system-daily-review-item-actions",
+      });
+      new ButtonComponent(actions)
+        .setButtonText("Open")
+        .onClick(async () => {
+          try {
+            const leaf = this.app.workspace.getLeaf(false);
+            await leaf.openFile(item.file, { active: true });
+          } catch (error) {
+            new Notice(
+              error instanceof Error ? error.message : "Could not open review note."
+            );
+          }
+        });
+    }
+  }
+
   async saveAndClose(): Promise<void> {
     try {
-      await this.plugin.saveJournal(this.collectValues());
-      new Notice("Journal entry saved.");
+      await this.plugin.saveJournal(this.collectValues(), this.targetDate);
+      new Notice(`Journal entry saved for ${this.targetDate.format("YYYY-MM-DD")}.`);
       this.close();
     } catch (error) {
       new Notice(error instanceof Error ? error.message : "Could not save journal entry.");
@@ -3262,7 +3466,7 @@ class JournalingPromptModal extends Modal {
 
   async addLongJournalEntry(): Promise<void> {
     try {
-      await this.plugin.openLongJournalEntry(this.collectValues());
+      await this.plugin.openLongJournalEntry(this.collectValues(), this.targetDate);
       this.close();
     } catch (error) {
       new Notice(error instanceof Error ? error.message : "Could not open long journal entry.");
@@ -4137,6 +4341,48 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.dailyPrompts.promptBehavior =
               normalizeDailyPromptBehavior(value);
+            await this.plugin.saveSettings();
+          });
+      });
+
+    section.createEl("h3", { text: "Review reminders" });
+    section.createDiv({
+      cls: "journaling-system-section-note",
+      text: "Optionally show a collapsed panel in the daily prompt with the latest completed weekly, monthly, and annual review summaries.",
+    });
+
+    new Setting(section)
+      .setName("Show review reminders")
+      .setDesc("Add the latest completed review summaries below the daily prompt fields.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.dailyPrompts.reviewContext.enabled)
+          .onChange(async (value) => {
+            this.plugin.settings.dailyPrompts.reviewContext.enabled = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(section)
+      .setName("Show on desktop")
+      .setDesc("Show review reminders in the desktop app.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.dailyPrompts.reviewContext.showOnDesktop)
+          .onChange(async (value) => {
+            this.plugin.settings.dailyPrompts.reviewContext.showOnDesktop = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(section)
+      .setName("Show on mobile")
+      .setDesc("Show review reminders in the mobile app. Off by default to keep the daily prompt compact.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.dailyPrompts.reviewContext.showOnMobile)
+          .onChange(async (value) => {
+            this.plugin.settings.dailyPrompts.reviewContext.showOnMobile = value;
             await this.plugin.saveSettings();
           });
       });
@@ -5465,6 +5711,9 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   settings.dailyPrompts.promptBehavior = normalizeDailyPromptBehavior(
     settings.dailyPrompts.promptBehavior
   );
+  settings.dailyPrompts.reviewContext = normalizeDailyReviewContextSettings(
+    settings.dailyPrompts.reviewContext
+  );
   settings.reviews.weekly.promptWeekday = normalizeWeekday(
     settings.reviews.weekly.promptWeekday,
     DEFAULT_SETTINGS.reviews.weekly.promptWeekday
@@ -6082,6 +6331,25 @@ function encodeBaseRowHeight(value: BaseRowHeight): string {
 
 function normalizeDailyPromptBehavior(value: unknown): DailyPromptBehavior {
   return value === "if-no-quick-entry" ? value : "always";
+}
+
+function normalizeDailyReviewContextSettings(
+  value: unknown
+): DailyReviewContextSettings {
+  const defaults = DEFAULT_SETTINGS.dailyPrompts.reviewContext;
+  const raw = isRecord(value) ? value : {};
+  return {
+    enabled:
+      typeof raw.enabled === "boolean" ? raw.enabled : defaults.enabled,
+    showOnDesktop:
+      typeof raw.showOnDesktop === "boolean"
+        ? raw.showOnDesktop
+        : defaults.showOnDesktop,
+    showOnMobile:
+      typeof raw.showOnMobile === "boolean"
+        ? raw.showOnMobile
+        : defaults.showOnMobile,
+  };
 }
 
 function normalizeLocalAiSettings(value: unknown): LocalAiSettings {
@@ -6714,20 +6982,10 @@ function formatJournalEmbedDateLabel(
   frontmatter: Record<string, unknown>,
   dateProperty: string
 ): string {
-  const frontmatterDate = frontmatter[dateProperty];
-  const frontmatterMoment =
-    frontmatterDate === undefined || frontmatterDate === null
-      ? null
-      : parseJournalDate(String(frontmatterDate));
+  const frontmatterMoment = getJournalMoment(file, frontmatter, dateProperty);
 
   if (frontmatterMoment?.isValid()) {
     return `**${frontmatterMoment.format("YYYY-MM-DD dddd")}**`;
-  }
-
-  const dateMatch = /\d{4}-\d{2}-\d{2}/.exec(file.path);
-  const pathMoment = dateMatch ? parseJournalDate(dateMatch[0]) : null;
-  if (pathMoment?.isValid()) {
-    return `**${pathMoment.format("YYYY-MM-DD dddd")}**`;
   }
 
   return `**${file.basename}**`;
@@ -6807,6 +7065,15 @@ function getJournalDateKey(
   frontmatter: Record<string, unknown>,
   dateProperty: string
 ): string {
+  const journalMoment = getJournalMoment(file, frontmatter, dateProperty);
+  return journalMoment?.isValid() ? journalMoment.format("YYYY-MM-DD") : file.path;
+}
+
+function getJournalMoment(
+  file: TFile,
+  frontmatter: Record<string, unknown>,
+  dateProperty: string
+): Moment | null {
   const frontmatterDate = frontmatter[dateProperty];
   const frontmatterMoment =
     frontmatterDate === undefined || frontmatterDate === null
@@ -6814,12 +7081,12 @@ function getJournalDateKey(
       : parseJournalDate(String(frontmatterDate));
 
   if (frontmatterMoment?.isValid()) {
-    return frontmatterMoment.format("YYYY-MM-DD");
+    return frontmatterMoment;
   }
 
   const dateMatch = /\d{4}-\d{2}-\d{2}/.exec(file.path);
   const pathMoment = dateMatch ? parseJournalDate(dateMatch[0]) : null;
-  return pathMoment?.isValid() ? pathMoment.format("YYYY-MM-DD") : file.path;
+  return pathMoment?.isValid() ? pathMoment : null;
 }
 
 function extractNormalizedCaptureEntries(content: string, heading: string): Set<string> {
@@ -7003,6 +7270,24 @@ function formatInitialTextValue(value: unknown): string {
   }
 
   return String(value);
+}
+
+function getReviewReminderSummary(
+  frontmatter: Record<string, unknown>,
+  summaryProperty: string
+): string {
+  for (const property of [
+    summaryProperty,
+    DEFAULT_SETTINGS.ai.summaryProperty,
+    "journalAISummary",
+  ]) {
+    const summary = formatInitialTextValue(frontmatter[property]).trim();
+    if (summary.length > 0) {
+      return summary;
+    }
+  }
+
+  return "";
 }
 
 function formatInitialNumberValue(value: unknown): string {
