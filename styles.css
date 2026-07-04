@@ -5,7 +5,9 @@
 }
 
 .journaling-system-settings {
-  overflow: visible;
+  overflow-y: auto;
+  overflow-x: visible;
+  min-height: 0;
   padding-bottom: 120px;
 }
 
