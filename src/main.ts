@@ -3433,7 +3433,7 @@ class JournalingPromptModal extends Modal {
       });
       content.createDiv({
         cls: "journaling-system-daily-review-item-summary",
-        text: truncateText(item.summary, 700),
+        text: item.summary,
       });
 
       const actions = row.createDiv({

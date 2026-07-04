@@ -433,6 +433,11 @@
 }
 
 .journaling-system-daily-review-item-summary {
+  background: var(--background-secondary);
+  border-radius: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
   white-space: pre-wrap;
 }
 
@@ -631,6 +636,10 @@
 
   .journaling-system-daily-review-item-actions {
     justify-content: flex-start;
+  }
+
+  .journaling-system-daily-review-item-summary {
+    max-height: 140px;
   }
 
   .journaling-system-weekday-row,

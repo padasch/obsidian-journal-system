@@ -142,10 +142,10 @@ daily note. Scheduled prompt popups also include a `Journal yesterday` action.
 
 The daily prompt can also show a collapsed Review reminders panel below the daily
 fields. The panel reads existing review-note frontmatter, shows the latest
-completed weekly, monthly, and annual review summaries, and falls back to
-`journalSummary` or legacy `journalAISummary` values when needed. It is enabled
-on desktop by default and hidden on mobile by default. The panel never creates or
-refreshes review notes.
+completed weekly, monthly, and annual review summaries in scrollable fields, and
+falls back to `journalSummary` or legacy `journalAISummary` values when needed.
+It is enabled on desktop by default and hidden on mobile by default. The panel
+never creates or refreshes review notes.
 
 Daily and review notes receive `journalType` frontmatter. Daily notes also receive
 period keys such as `journalWeek`, `journalMonth`, and `journalYear`. Notes also
