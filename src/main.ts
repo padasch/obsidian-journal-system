@@ -2358,9 +2358,14 @@ export default class JournalingSystemPlugin extends Plugin {
     if (canonicalFile) {
       const frontmatter = this.app.metadataCache.getFileCache(canonicalFile)?.frontmatter;
       const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+      const journalType = frontmatterRecord[typeProperty];
+      const hasPeriodMetadata =
+        frontmatterRecord[period.property] !== undefined ||
+        frontmatterRecord[dateProperty] !== undefined;
       if (
-        String(frontmatterRecord[typeProperty] ?? "") === level &&
-        frontmatterMatchesReviewPeriod(frontmatterRecord, period, dateProperty, level)
+        (journalType === undefined || String(journalType) === level) &&
+        (!hasPeriodMetadata ||
+          frontmatterMatchesReviewPeriod(frontmatterRecord, period, dateProperty, level))
       ) {
         return canonicalFile;
       }
@@ -3354,6 +3359,10 @@ class JournalHeatmapModal extends Modal {
   private async load(): Promise<void> {
     this.modalEl.addClass("journaling-system-modal-shell");
     applyModalAppearance(this.modalEl, this.plugin.settings);
+    this.modalEl.style.setProperty(
+      "--journaling-system-modal-width",
+      `${Math.max(normalizeModalWidth(this.plugin.settings.ui.modalWidthPx), 980)}px`
+    );
     this.contentEl.addClass("journaling-system-modal");
     this.contentEl.empty();
     this.setTitle("Journal review heatmap");

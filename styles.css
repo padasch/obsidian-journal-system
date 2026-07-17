@@ -407,9 +407,9 @@
 
 .journaling-system-heatmap-grid.is-daily {
   display: grid;
-  grid-auto-columns: 14px;
+  grid-auto-columns: 18px;
   grid-auto-flow: column;
-  grid-template-rows: repeat(7, 14px);
+  grid-template-rows: repeat(7, 18px);
   max-width: 100%;
   overflow-x: auto;
   padding: 2px 2px 5px;
@@ -424,10 +424,17 @@
 .journaling-system-heatmap-cell {
   background: var(--background-modifier-border);
   border: 0;
+  box-sizing: border-box;
   border-radius: 3px;
   display: block;
   flex: 0 0 14px;
   height: 14px;
+  line-height: 1;
+  margin: 0;
+  max-height: 14px;
+  max-width: 14px;
+  min-height: 14px;
+  min-width: 14px;
   padding: 0;
   width: 14px;
 }
