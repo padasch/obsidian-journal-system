@@ -2,6 +2,7 @@ import {
   App,
   ButtonComponent,
   FuzzySuggestModal,
+  prepareFuzzySearch,
   MarkdownView,
   Modal,
   Notice,
@@ -70,6 +71,7 @@ interface JournalPropertyDefinition {
   placeholder: string;
   type: JournalPropertyType;
   role: JournalPropertyRole;
+  isTopicField?: boolean;
   min?: number;
   max?: number;
   builtIn?: boolean;
@@ -208,6 +210,18 @@ interface DailyReviewReminderItem {
   label: string;
   file: TFile;
   summary: string;
+}
+
+interface PreviousReviewContextSection {
+  label: string;
+  text: string;
+}
+
+interface PreviousReviewContext {
+  level: ReviewLevel;
+  date: Moment;
+  file: TFile;
+  sections: PreviousReviewContextSection[];
 }
 
 interface NumericPropertySummary {
@@ -2238,6 +2252,102 @@ export default class JournalingSystemPlugin extends Plugin {
     return items;
   }
 
+  async getPreviousReviewContext(
+    level: ReviewLevel,
+    now = moment()
+  ): Promise<PreviousReviewContext | null> {
+    const previousDate = getReviewPeriodDate(level, now, 1);
+    const file = this.getExistingReviewNoteForPeriod(level, previousDate);
+    if (!file) {
+      return null;
+    }
+
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+    const summaryProperty = this.getAiSummaryProperty();
+    const summaryProperties = new Set([
+      summaryProperty,
+      DEFAULT_SETTINGS.ai.summaryProperty,
+      "journalAISummary",
+    ]);
+    const sections: PreviousReviewContextSection[] = [];
+    const summary = getReviewReminderSummary(frontmatterRecord, summaryProperty);
+
+    if (summary.length > 0) {
+      sections.push({ label: "Summary", text: summary });
+    }
+
+    for (const property of this.getReviewProperties(level)) {
+      const propertyName = property.property.trim();
+      if (
+        propertyName.length === 0 ||
+        property.type === "checkbox" ||
+        summaryProperties.has(propertyName)
+      ) {
+        continue;
+      }
+
+      const value = formatInitialTextValue(frontmatterRecord[propertyName]).trim();
+      if (value.length === 0) {
+        continue;
+      }
+
+      sections.push({
+        label: property.label.trim() || propertyName,
+        text: value,
+      });
+    }
+
+    const content = await this.app.vault.read(file);
+    const reflection = extractSectionText(
+      content,
+      this.settings.reviews.reflectionHeading
+    );
+    if (reflection.length > 0) {
+      sections.push({ label: "Reflection", text: reflection });
+    }
+
+    return sections.length > 0
+      ? { level, date: previousDate, file, sections }
+      : null;
+  }
+
+  private getExistingReviewNoteForPeriod(
+    level: ReviewLevel,
+    now: Moment
+  ): TFile | null {
+    const automatic = this.settings.automaticProperties;
+    const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
+    const dateProperty = automatic.date.trim() || DEFAULT_SETTINGS.automaticProperties.date;
+    const period = this.getReviewPeriod(level, now);
+    const canonicalFile = this.app.vault.getFileByPath(this.getReviewNotePath(level, now));
+
+    if (canonicalFile) {
+      const frontmatter = this.app.metadataCache.getFileCache(canonicalFile)?.frontmatter;
+      const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+      if (
+        String(frontmatterRecord[typeProperty] ?? "") === level &&
+        frontmatterMatchesReviewPeriod(frontmatterRecord, period, dateProperty, level)
+      ) {
+        return canonicalFile;
+      }
+    }
+
+    return (
+      this.app.vault
+        .getMarkdownFiles()
+        .filter((file) => {
+          const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+          const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+          return (
+            String(frontmatterRecord[typeProperty] ?? "") === level &&
+            frontmatterMatchesReviewPeriod(frontmatterRecord, period, dateProperty, level)
+          );
+        })
+        .sort((a, b) => a.path.localeCompare(b.path))[0] ?? null
+    );
+  }
+
   shouldShowDailyReviewContext(): boolean {
     const settings = this.settings.dailyPrompts.reviewContext;
     if (!settings.enabled) {
@@ -2688,6 +2798,13 @@ export default class JournalingSystemPlugin extends Plugin {
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }
 
+  collectPageSuggestionValues(scope: TopicSuggestionScope = "daily"): string[] {
+    const scanRoots = this.getTopicSuggestionScanRoots(scope);
+    const files = this.getMarkdownFilesForTopicSuggestionScan(scanRoots);
+
+    return collectPageSuggestionValuesFromFiles(files);
+  }
+
   private getTopicSuggestionScanRoots(scope: TopicSuggestionScope): string[] {
     const rootTemplate = this.settings.reviews.topicSuggestionFolders.root.trim();
     const configuredRoot = this.getTopicSuggestionTemplateRoot(rootTemplate);
@@ -2954,6 +3071,7 @@ class ReviewWizardModal extends Modal {
   private reviewFile: TFile | null = null;
   private properties: ReviewPropertyDefinition[] = [];
   private contextItems: DailyReviewSummaryItem[] = [];
+  private previousReviewContext: PreviousReviewContext | null = null;
   private initialFrontmatter: Record<string, unknown> = {};
   private values = new Map<string, string | number | string[] | boolean>();
   private stepIndex = 0;
@@ -3002,6 +3120,10 @@ class ReviewWizardModal extends Modal {
         this.reviewLevel,
         this.reviewDate
       );
+      this.previousReviewContext = await this.plugin.getPreviousReviewContext(
+        this.reviewLevel,
+        this.reviewDate
+      );
       const frontmatter = this.app.metadataCache.getFileCache(this.reviewFile)?.frontmatter;
       this.initialFrontmatter = isRecord(frontmatter) ? { ...frontmatter } : {};
       this.summaryStartedFromAi = isTruthyFrontmatterValue(
@@ -3046,6 +3168,7 @@ class ReviewWizardModal extends Modal {
     );
 
     this.renderDailyContext(this.contentEl);
+    this.renderPreviousReviewContext(this.contentEl);
     this.renderReviewSummary(this.contentEl);
 
     const fieldEl = this.contentEl.createDiv({ cls: "journaling-system-field" });
@@ -3136,6 +3259,7 @@ class ReviewWizardModal extends Modal {
       `${capitalize(this.reviewLevel)} review wizard - ${formatReviewPeriodTitle(this.reviewLevel, this.reviewDate)}`
     );
     this.renderDailyContext(this.contentEl);
+    this.renderPreviousReviewContext(this.contentEl);
     this.renderReviewSummary(this.contentEl);
 
     const buttonRow = this.contentEl.createDiv({ cls: "journaling-system-modal-actions" });
@@ -3199,6 +3323,62 @@ class ReviewWizardModal extends Modal {
         text: item.shortText || "No quick entry.",
       });
     }
+  }
+
+  private renderPreviousReviewContext(containerEl: HTMLElement): void {
+    const previous = this.previousReviewContext;
+    if (!previous) {
+      return;
+    }
+
+    const details = containerEl.createEl("details", {
+      cls: "journaling-system-review-wizard-context journaling-system-review-wizard-previous-review",
+    });
+    details.createEl("summary", {
+      text: `Previous ${previous.level} review (${formatReviewPeriodTitle(previous.level, previous.date)})`,
+      cls: "journaling-system-review-wizard-summary",
+    });
+
+    const body = details.createDiv({
+      cls: "journaling-system-review-wizard-context-body journaling-system-previous-review-body",
+    });
+    body.createDiv({
+      cls: "journaling-system-field-hint",
+      text: `Source: ${previous.file.path}`,
+    });
+
+    for (const [index, section] of previous.sections.entries()) {
+      const sectionEl = body.createDiv({
+        cls: "journaling-system-previous-review-section",
+      });
+      if (index === 0) {
+        sectionEl.addClass("is-first");
+      }
+      sectionEl.createDiv({
+        cls: "journaling-system-review-wizard-day-title",
+        text: section.label,
+      });
+      sectionEl.createDiv({
+        cls: "journaling-system-previous-review-text",
+        text: section.text,
+      });
+    }
+
+    const actions = body.createDiv({
+      cls: "journaling-system-daily-review-item-actions",
+    });
+    new ButtonComponent(actions)
+      .setButtonText("Open")
+      .onClick(async () => {
+        try {
+          const leaf = this.app.workspace.getLeaf(false);
+          await leaf.openFile(previous.file, { active: true });
+        } catch (error) {
+          new Notice(
+            error instanceof Error ? error.message : "Could not open previous review note."
+          );
+        }
+      });
   }
 
   private renderReviewSummary(containerEl: HTMLElement): void {
@@ -3590,12 +3770,21 @@ function createJournalInput(
     };
   }
 
-  const existingValues = plugin.collectExistingValues(definition.property, collectScope);
+  const usePageSuggestions =
+    definition.type === "multiselect" &&
+    collectScope === "daily" &&
+    isTopicFieldDefinition(definition);
+  const existingValues = usePageSuggestions
+    ? plugin.collectPageSuggestionValues(collectScope)
+    : plugin.collectExistingValues(definition.property, collectScope);
   const multiInput = new MultiSelectPropertyInput(
     fieldEl,
     existingValues,
     definition.placeholder || "One entry per line",
-    flattenPropertyValue(initialValue).join("\n")
+    flattenPropertyValue(initialValue).join("\n"),
+    {
+      showSuggestionsWhenEmpty: usePageSuggestions,
+    }
   );
   return {
     getValue: () => multiInput.getValues(),
@@ -3645,7 +3834,10 @@ class FuzzyTextPropertyInput {
 
     const suggestions = this.existingValues
       .filter((value) => value.toLowerCase() !== query.toLowerCase())
-      .map((value) => ({ value, score: fuzzyScore(value, query) }))
+      .map((value) => ({
+        value,
+        score: query.length === 0 ? 0 : fuzzyMatchScore(value, query),
+      }))
       .filter(({ score }) => score > 0)
       .sort((a, b) => b.score - a.score || a.value.localeCompare(b.value))
       .slice(0, 8);
@@ -3668,13 +3860,18 @@ class FuzzyTextPropertyInput {
 class MultiSelectPropertyInput {
   private readonly textareaEl: HTMLTextAreaElement;
   private readonly suggestionsEl: HTMLElement;
+  private readonly showSuggestionsWhenEmpty: boolean;
 
   constructor(
     containerEl: HTMLElement,
     private readonly existingValues: string[],
     placeholder: string,
-    initialValue: string
+    initialValue: string,
+    options: {
+      showSuggestionsWhenEmpty?: boolean;
+    } = {}
   ) {
+    this.showSuggestionsWhenEmpty = options.showSuggestionsWhenEmpty ?? false;
     const wrapper = containerEl.createDiv({ cls: "journaling-system-multiselect" });
     this.textareaEl = wrapper.createEl("textarea", {
       cls: "journaling-system-textarea journaling-system-multiselect-textarea",
@@ -3706,17 +3903,28 @@ class MultiSelectPropertyInput {
 
   private renderSuggestions(): void {
     this.suggestionsEl.empty();
-    const query = getCurrentLine(this.textareaEl).trim();
+    const query = normalizeSuggestionText(getCurrentLine(this.textareaEl));
+    const selectedValues = new Set(this.currentValues().map(normalizeSuggestionText));
 
-    if (query.length === 0) {
+    if (query.length === 0 && !this.showSuggestionsWhenEmpty) {
       return;
     }
 
     const suggestions = this.existingValues
-      .filter((value) => !this.currentValues().includes(value))
-      .map((value) => ({ value, score: fuzzyScore(value, query) }))
-      .filter(({ score }) => score > 0)
-      .sort((a, b) => b.score - a.score || a.value.localeCompare(b.value))
+      .filter((value) => !selectedValues.has(normalizeSuggestionText(value)))
+      .map((value) => ({
+        value,
+        score:
+          query.length === 0
+            ? 0
+            : fuzzyMatchScore(normalizeSuggestionText(value), query),
+      }))
+      .filter(({ score }) => query.length === 0 || score > 0)
+      .sort((a, b) =>
+        query.length === 0
+          ? a.value.localeCompare(b.value)
+          : b.score - a.score || a.value.localeCompare(b.value)
+      )
       .slice(0, 8);
 
     for (const { value } of suggestions) {
@@ -3831,7 +4039,7 @@ class ReviewTopicsPickerModal extends Modal {
     const availableOptions = this.availableValues
       .map((value) => ({
         value,
-        score: query.length === 0 ? 0 : fuzzyScore(value, query),
+        score: query.length === 0 ? 0 : fuzzyMatchScore(value, query),
       }))
       .filter(({ score }) => query.length === 0 || score > 0)
       .sort((a, b) =>
@@ -7394,6 +7602,44 @@ function parseInteger(value: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function isTopicFieldDefinition(definition: JournalPropertyDefinition): boolean {
+  return (
+    definition.isTopicField === true ||
+    /topic/i.test(definition.label) ||
+    /topic/i.test(definition.property)
+  );
+}
+
+function normalizeSuggestionText(value: string): string {
+  return value.replace(/^\[\[/, "").replace(/\]\]$/, "").trim();
+}
+
+function collectPageSuggestionValuesFromFiles(files: TFile[]): string[] {
+  const nameCounts = new Map<string, number>();
+  for (const file of files) {
+    const normalized = file.basename.toLowerCase();
+    nameCounts.set(normalized, (nameCounts.get(normalized) ?? 0) + 1);
+  }
+
+  const values = new Set<string>();
+  for (const file of files) {
+    const basename = file.basename;
+    if (basename.length === 0) {
+      continue;
+    }
+
+    const hasDuplicateBaseName =
+      (nameCounts.get(file.basename.toLowerCase()) ?? 0) > 1;
+    const linkTarget = hasDuplicateBaseName
+      ? file.path.replace(/\.md$/i, "")
+      : basename;
+
+    values.add(`[[${linkTarget}]]`);
+  }
+
+  return Array.from(values).sort((a, b) => a.localeCompare(b));
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -7597,24 +7843,14 @@ function existingValueOrBlank(existing: unknown): number | string {
   return typeof existing === "number" ? existing : "";
 }
 
-function fuzzyScore(value: string, query: string): number {
-  const haystack = value.toLowerCase();
-  const needle = query.toLowerCase();
-
-  if (haystack === needle) return 1000;
-  if (haystack.startsWith(needle)) return 800 - haystack.length;
-  if (haystack.includes(needle)) return 500 - haystack.indexOf(needle);
-
-  let score = 0;
-  let queryIndex = 0;
-  for (let i = 0; i < haystack.length && queryIndex < needle.length; i += 1) {
-    if (haystack[i] === needle[queryIndex]) {
-      score += 10;
-      queryIndex += 1;
-    }
+function fuzzyMatchScore(value: string, query: string): number {
+  const matcher = query.length === 0 ? null : prepareFuzzySearch(query);
+  if (!matcher) {
+    return 0;
   }
 
-  return queryIndex === needle.length ? score : 0;
+  const result = matcher(value);
+  return result ? result.score : 0;
 }
 
 function capitalize(value: string): string {

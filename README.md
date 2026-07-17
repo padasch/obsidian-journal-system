@@ -29,6 +29,8 @@ long-form journal heading.
 - Try a weekly review wizard that shows concise daily context, offers an editable
   summary, can generate a local AI draft, steps through enabled review
   properties, then opens the review note for further writing.
+- Show the previous review period as a collapsed, scrollable context panel in
+  each review wizard when a prior review contains written content.
 - Show a collapsed daily reminder panel with the latest completed weekly,
   monthly, and annual review summaries.
 
@@ -172,6 +174,10 @@ The weekly review wizard is a trial flow. It creates or opens the weekly review,
 shows concise daily context, lets the user write or edit `journalSummary`, steps
 through the enabled weekly review properties, saves the entered properties, and
 then opens the note at the reflection heading.
+The monthly and annual wizards show their matching weekly or monthly source
+context, respectively. Each review wizard also offers the previous week, month,
+or year in a collapsed scrollable panel when that prior review contains written
+content, with an action to open the source note.
 When local AI review assistance is enabled, the wizard can generate a private
 Ollama-backed weekly summary from the matching daily quick entries and long
 journal sections. The generated text is inserted into the editable summary

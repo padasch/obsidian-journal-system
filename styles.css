@@ -374,6 +374,33 @@
   padding-right: 4px;
 }
 
+.journaling-system-review-wizard-previous-review {
+  margin-bottom: 14px;
+}
+
+.journaling-system-previous-review-section {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 8px;
+}
+
+.journaling-system-previous-review-section.is-first {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.journaling-system-previous-review-text {
+  background: var(--background-secondary);
+  border-radius: 6px;
+  margin-top: 4px;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+.journaling-system-previous-review-body .journaling-system-daily-review-item-actions {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 8px;
+}
+
 .journaling-system-review-wizard-day {
   border-top: 1px solid var(--background-modifier-border);
   padding-top: 8px;
