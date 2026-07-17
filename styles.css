@@ -352,6 +352,116 @@
   font-size: calc(var(--journaling-system-modal-font-size) - 1px);
 }
 
+.journaling-system-heatmap-summary {
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 10px;
+}
+
+.journaling-system-heatmap-summary-title {
+  font-weight: 600;
+}
+
+.journaling-system-heatmap-summary-desc,
+.journaling-system-heatmap-band-desc {
+  color: var(--text-muted);
+  font-size: calc(var(--journaling-system-modal-font-size) - 2px);
+  margin-top: 2px;
+}
+
+.journaling-system-heatmap-legend {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+
+.journaling-system-heatmap-legend-item {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: calc(var(--journaling-system-modal-font-size) - 2px);
+  gap: 5px;
+}
+
+.journaling-system-heatmap-band {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 12px 0 2px;
+}
+
+.journaling-system-heatmap-band-header {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.journaling-system-heatmap-band-title {
+  font-weight: 600;
+}
+
+.journaling-system-heatmap-grid {
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.journaling-system-heatmap-grid.is-daily {
+  display: grid;
+  grid-auto-columns: 14px;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 14px);
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px 2px 5px;
+}
+
+.journaling-system-heatmap-grid.is-period-row {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 14px;
+}
+
+.journaling-system-heatmap-cell {
+  background: var(--background-modifier-border);
+  border: 0;
+  border-radius: 3px;
+  display: block;
+  flex: 0 0 14px;
+  height: 14px;
+  padding: 0;
+  width: 14px;
+}
+
+button.journaling-system-heatmap-cell {
+  cursor: pointer;
+}
+
+.journaling-system-heatmap-cell.is-complete {
+  background: var(--color-green);
+}
+
+.journaling-system-heatmap-cell.is-missing {
+  background: var(--background-modifier-border);
+  border: 1px solid var(--text-faint);
+}
+
+.journaling-system-heatmap-cell.is-future {
+  background: transparent;
+  border: 1px dashed var(--background-modifier-border);
+  opacity: 0.7;
+}
+
+.journaling-system-heatmap-cell.is-empty {
+  background: transparent;
+}
+
+button.journaling-system-heatmap-cell:not(:disabled):hover,
+button.journaling-system-heatmap-cell:not(:disabled):focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+  transform: scale(1.15);
+}
+
 .journaling-system-review-wizard-context {
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
@@ -657,6 +767,12 @@
 
   .journaling-system-review-wizard-context-body {
     max-height: 160px;
+  }
+
+  .journaling-system-heatmap-band-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .journaling-system-daily-review-item {

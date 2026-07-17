@@ -33,6 +33,8 @@ long-form journal heading.
   each review wizard when a prior review contains written content.
 - Show a collapsed daily reminder panel with the latest completed weekly,
   monthly, and annual review summaries.
+- Open a GitHub-style journal heatmap for daily entries and periodic reviews,
+  with missing cells opening the relevant prompt or review wizard.
 
 ## Review philosophy
 
@@ -122,6 +124,7 @@ the parsed folder underneath the setting.
 - `Journaling System: Open weekly review`
 - `Journaling System: Start weekly review wizard`
 - `Journaling System: Choose review period`
+- `Journaling System: Open journal review heatmap`
 - `Journaling System: Open monthly review`
 - `Journaling System: Open annual review`
 - `Journaling System: Snooze weekly review prompt`
@@ -148,6 +151,14 @@ completed weekly, monthly, and annual review summaries in scrollable fields, and
 falls back to `journalSummary` or legacy `journalAISummary` values when needed.
 It is enabled on desktop by default and hidden on mobile by default. The panel
 never creates or refreshes review notes.
+
+The `Journaling System: Open journal review heatmap` command shows daily entries
+for the current year, weekly and monthly reviews for the current year, and annual
+reviews for the current decade. Future periods stay neutral. Missing daily cells
+open the daily prompt, while missing review cells open the matching review
+wizard. A period counts as complete only when it contains an actual journal or
+review entry, not just an empty generated note. Quarterly reviews are not shown
+yet because the current review model has no quarterly note type or wizard.
 
 Daily and review notes receive `journalType` frontmatter. Daily notes also receive
 period keys such as `journalWeek`, `journalMonth`, and `journalYear`. Notes also

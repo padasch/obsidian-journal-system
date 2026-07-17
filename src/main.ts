@@ -224,6 +224,31 @@ interface PreviousReviewContext {
   sections: PreviousReviewContextSection[];
 }
 
+type HeatmapLevel = "daily" | ReviewLevel;
+
+interface JournalHeatmapCell {
+  level: HeatmapLevel;
+  date: Moment;
+  label: string;
+  description: string;
+  complete: boolean;
+  future: boolean;
+  file: TFile | null;
+}
+
+interface JournalHeatmapBand {
+  level: HeatmapLevel;
+  label: string;
+  description: string;
+  cells: JournalHeatmapCell[];
+}
+
+interface JournalHeatmapData {
+  year: number;
+  decadeStart: number;
+  bands: JournalHeatmapBand[];
+}
+
 interface NumericPropertySummary {
   label: string;
   count: number;
@@ -789,6 +814,14 @@ export default class JournalingSystemPlugin extends Plugin {
       name: "Choose review period",
       callback: () => {
         new ReviewPeriodSelectionModal(this.app, this).open();
+      },
+    });
+
+    this.addCommand({
+      id: "open-journal-review-heatmap",
+      name: "Open journal review heatmap",
+      callback: () => {
+        new JournalHeatmapModal(this.app, this).open();
       },
     });
 
@@ -2348,6 +2381,248 @@ export default class JournalingSystemPlugin extends Plugin {
     );
   }
 
+  async getJournalHeatmapData(now = moment()): Promise<JournalHeatmapData> {
+    const year = Number(now.format("YYYY"));
+    const decadeStart = Math.floor(year / 10) * 10;
+    const dailyCells = await this.getHeatmapDailyCells(now);
+    const [weeklyCells, monthlyCells, annualCells] = await Promise.all([
+      this.getHeatmapReviewCells("weekly", now, this.getHeatmapWeekDates(now)),
+      this.getHeatmapReviewCells("monthly", now, this.getHeatmapMonthDates(now)),
+      this.getHeatmapReviewCells(
+        "annual",
+        now,
+        this.getHeatmapYearDates(now, decadeStart)
+      ),
+    ]);
+
+    return {
+      year,
+      decadeStart,
+      bands: [
+        {
+          level: "daily",
+          label: "Daily entries",
+          description: `${year}`,
+          cells: dailyCells,
+        },
+        {
+          level: "weekly",
+          label: "Weekly reviews",
+          description: `${year} · ISO weeks`,
+          cells: weeklyCells,
+        },
+        {
+          level: "monthly",
+          label: "Monthly reviews",
+          description: `${year}`,
+          cells: monthlyCells,
+        },
+        {
+          level: "annual",
+          label: "Annual reviews",
+          description: `${decadeStart}-${decadeStart + 9}`,
+          cells: annualCells,
+        },
+      ],
+    };
+  }
+
+  private async getHeatmapDailyCells(now: Moment): Promise<JournalHeatmapCell[]> {
+    const start = now.clone().startOf("year");
+    const totalDays = Number(start.clone().endOf("year").format("DDD"));
+    const today = now.clone().endOf("day").valueOf();
+    const notesByDate = this.getHeatmapDailyNotesByDate(now);
+    const cells: JournalHeatmapCell[] = [];
+
+    for (let offset = 0; offset < totalDays; offset += 1) {
+      const date = start.clone().add(offset, "days");
+      const file = notesByDate.get(date.format("YYYY-MM-DD")) ?? null;
+      const future = date.valueOf() > today;
+      const complete = !future && file ? await this.dailyNoteHasJournalEntry(file) : false;
+      const label = date.format("YYYY-MM-DD dddd");
+
+      cells.push({
+        level: "daily",
+        date,
+        label,
+        description: label,
+        complete,
+        future,
+        file,
+      });
+    }
+
+    return cells;
+  }
+
+  private async getHeatmapReviewCells(
+    level: ReviewLevel,
+    now: Moment,
+    dates: Moment[]
+  ): Promise<JournalHeatmapCell[]> {
+    const today = now.clone().endOf("day").valueOf();
+    const cells: JournalHeatmapCell[] = [];
+
+    for (const date of dates) {
+      const future = date.valueOf() > today;
+      const file = future ? null : this.getExistingReviewNoteForPeriod(level, date);
+      const complete =
+        !future && file ? await this.reviewNoteHasJournalEntry(file, level) : false;
+      const label = formatReviewPeriodTitle(level, date);
+
+      cells.push({
+        level,
+        date,
+        label,
+        description: formatReviewPeriodDescription(level, date),
+        complete,
+        future,
+        file,
+      });
+    }
+
+    return cells;
+  }
+
+  private getHeatmapDailyNotesByDate(now: Moment): Map<string, TFile> {
+    const automatic = this.settings.automaticProperties;
+    const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
+    const dateProperty = automatic.date.trim() || DEFAULT_SETTINGS.automaticProperties.date;
+    const year = now.format("YYYY");
+    const canonicalPaths = new Set<string>();
+    const notesByDate = new Map<string, TFile>();
+
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+      const journalType = frontmatterRecord[typeProperty];
+      if (journalType !== undefined && String(journalType) !== "daily") {
+        continue;
+      }
+
+      const date = getJournalMoment(file, frontmatterRecord, dateProperty);
+      if (!date?.isValid() || date.format("YYYY") !== year) {
+        continue;
+      }
+
+      canonicalPaths.add(this.getDailyNotePath(date));
+      const key = date.format("YYYY-MM-DD");
+      const existing = notesByDate.get(key);
+      if (!existing || file.path === this.getDailyNotePath(date)) {
+        notesByDate.set(key, file);
+      }
+    }
+
+    for (const path of canonicalPaths) {
+      const file = this.app.vault.getFileByPath(path);
+      if (!file) {
+        continue;
+      }
+
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+      const date = getJournalMoment(file, frontmatterRecord, dateProperty);
+      if (date?.isValid() && date.format("YYYY") === year) {
+        notesByDate.set(date.format("YYYY-MM-DD"), file);
+      }
+    }
+
+    return notesByDate;
+  }
+
+  private async dailyNoteHasJournalEntry(file: TFile): Promise<boolean> {
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+    const automaticProperties = new Set(
+      Object.values(this.settings.automaticProperties)
+        .map((property) => property.trim())
+        .filter((property) => property.length > 0)
+    );
+
+    for (const property of this.getEnabledProperties()) {
+      const propertyName = property.property.trim();
+      if (
+        propertyName.length > 0 &&
+        !automaticProperties.has(propertyName) &&
+        hasMeaningfulFrontmatterValue(frontmatterRecord[propertyName])
+      ) {
+        return true;
+      }
+    }
+
+    const content = await this.app.vault.read(file);
+    if (
+      hasLongJournalEntryContent(content, this.settings.dailyNote.longEntryHeading)
+    ) {
+      return true;
+    }
+
+    const shortHeading = this.settings.dailyNote.shortEntrySectionHeading.trim();
+    return (
+      shortHeading.length > 0 &&
+      extractNormalizedCaptureEntries(content, shortHeading).size > 0
+    );
+  }
+
+  private async reviewNoteHasJournalEntry(
+    file: TFile,
+    level: ReviewLevel
+  ): Promise<boolean> {
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
+    const summary = getReviewReminderSummary(
+      frontmatterRecord,
+      this.getAiSummaryProperty()
+    );
+    if (summary.length > 0) {
+      return true;
+    }
+
+    for (const property of this.getReviewProperties(level)) {
+      const propertyName = property.property.trim();
+      if (
+        propertyName.length > 0 &&
+        property.type !== "checkbox" &&
+        hasMeaningfulFrontmatterValue(frontmatterRecord[propertyName])
+      ) {
+        return true;
+      }
+    }
+
+    const content = await this.app.vault.read(file);
+    return (
+      extractSectionText(content, this.settings.reviews.reflectionHeading).length > 0
+    );
+  }
+
+  private getHeatmapWeekDates(now: Moment): Moment[] {
+    const isoYear = now.format("GGGG");
+    const date = now.clone().startOf("year").startOf("isoWeek");
+    const lastWeek = now.clone().endOf("year").startOf("isoWeek");
+    const dates: Moment[] = [];
+
+    while (date.valueOf() <= lastWeek.valueOf()) {
+      if (date.format("GGGG") === isoYear) {
+        dates.push(date.clone());
+      }
+      date.add(1, "week");
+    }
+
+    return dates;
+  }
+
+  private getHeatmapMonthDates(now: Moment): Moment[] {
+    return Array.from({ length: 12 }, (_, monthIndex) =>
+      now.clone().startOf("year").month(monthIndex).startOf("month")
+    );
+  }
+
+  private getHeatmapYearDates(now: Moment, decadeStart: number): Moment[] {
+    return Array.from({ length: 10 }, (_, offset) =>
+      now.clone().year(decadeStart + offset).startOf("year")
+    );
+  }
+
   shouldShowDailyReviewContext(): boolean {
     const settings = this.settings.dailyPrompts.reviewContext;
     if (!settings.enabled) {
@@ -3060,6 +3335,153 @@ class ReviewPeriodSelectionModal extends Modal {
           });
       });
     }
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+class JournalHeatmapModal extends Modal {
+  constructor(app: App, private readonly plugin: JournalingSystemPlugin) {
+    super(app);
+  }
+
+  onOpen(): void {
+    void this.load();
+  }
+
+  private async load(): Promise<void> {
+    this.modalEl.addClass("journaling-system-modal-shell");
+    applyModalAppearance(this.modalEl, this.plugin.settings);
+    this.contentEl.addClass("journaling-system-modal");
+    this.contentEl.empty();
+    this.setTitle("Journal review heatmap");
+    this.contentEl.createDiv({
+      cls: "journaling-system-field-hint",
+      text: "Preparing journal history...",
+    });
+
+    try {
+      const data = await this.plugin.getJournalHeatmapData();
+      this.render(data);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "Could not load journal heatmap.");
+      this.close();
+    }
+  }
+
+  private render(data: JournalHeatmapData): void {
+    this.contentEl.empty();
+    this.setTitle(`Journal review heatmap · ${data.year}`);
+
+    const summary = this.contentEl.createDiv({
+      cls: "journaling-system-heatmap-summary",
+    });
+    summary.createDiv({
+      cls: "journaling-system-heatmap-summary-title",
+      text: `${data.year} journal completion`,
+    });
+    summary.createDiv({
+      cls: "journaling-system-heatmap-summary-desc",
+      text: `Annual review window: ${data.decadeStart}-${data.decadeStart + 9}`,
+    });
+
+    const legend = this.contentEl.createDiv({ cls: "journaling-system-heatmap-legend" });
+    this.renderLegendItem(legend, "is-complete", "Complete");
+    this.renderLegendItem(legend, "is-missing", "Missing");
+    this.renderLegendItem(legend, "is-future", "Future");
+
+    for (const band of data.bands) {
+      this.renderBand(band);
+    }
+  }
+
+  private renderLegendItem(containerEl: HTMLElement, className: string, label: string): void {
+    const item = containerEl.createDiv({ cls: "journaling-system-heatmap-legend-item" });
+    item.createSpan({ cls: `journaling-system-heatmap-cell ${className}` });
+    item.createSpan({ text: label });
+  }
+
+  private renderBand(band: JournalHeatmapBand): void {
+    const relevantCells = band.cells.filter((cell) => !cell.future);
+    const completedCount = relevantCells.filter((cell) => cell.complete).length;
+    const bandEl = this.contentEl.createDiv({ cls: "journaling-system-heatmap-band" });
+    const header = bandEl.createDiv({ cls: "journaling-system-heatmap-band-header" });
+    header.createDiv({
+      cls: "journaling-system-heatmap-band-title",
+      text: `${band.label} · ${completedCount}/${relevantCells.length}`,
+    });
+    header.createDiv({
+      cls: "journaling-system-heatmap-band-desc",
+      text: band.description,
+    });
+
+    const grid = bandEl.createDiv({
+      cls: `journaling-system-heatmap-grid ${band.level === "daily" ? "is-daily" : "is-period-row"}`,
+    });
+
+    if (band.level === "daily" && band.cells.length > 0) {
+      const leadingCells = Number(band.cells[0].date.format("E")) - 1;
+      for (let index = 0; index < leadingCells; index += 1) {
+        grid.createDiv({ cls: "journaling-system-heatmap-cell is-empty" });
+      }
+    }
+
+    for (const cell of band.cells) {
+      const cellEl = grid.createEl("button", {
+        cls: "journaling-system-heatmap-cell",
+        type: "button",
+      });
+      if (cell.future) {
+        cellEl.addClass("is-future");
+        cellEl.disabled = true;
+      } else if (cell.complete) {
+        cellEl.addClass("is-complete");
+      } else {
+        cellEl.addClass("is-missing");
+      }
+
+      const status = cell.future ? "Future" : cell.complete ? "Complete" : "Missing";
+      const action =
+        cell.level === "daily"
+          ? "Open daily prompt"
+          : cell.complete
+            ? "Open review note"
+            : "Start review wizard";
+      const description = `${cell.description} · ${status} · ${action}`;
+      cellEl.setAttribute("aria-label", description);
+      cellEl.title = description;
+
+      if (!cell.future) {
+        cellEl.addEventListener("click", () => {
+          void this.openCell(cell);
+        });
+      }
+    }
+  }
+
+  private async openCell(cell: JournalHeatmapCell): Promise<void> {
+    this.close();
+
+    if (cell.level === "daily") {
+      new JournalingPromptModal(this.app, this.plugin, cell.date).open();
+      return;
+    }
+
+    if (cell.complete && cell.file) {
+      try {
+        const leaf = this.app.workspace.getLeaf(false);
+        await leaf.openFile(cell.file, { active: true });
+      } catch (error) {
+        new Notice(
+          error instanceof Error ? error.message : "Could not open review note."
+        );
+      }
+      return;
+    }
+
+    new ReviewWizardModal(this.app, this.plugin, cell.level, cell.date).open();
   }
 
   onClose(): void {
@@ -7444,6 +7866,18 @@ function flattenPropertyValue(value: unknown): string[] {
   }
 
   return [String(value)];
+}
+
+function hasMeaningfulFrontmatterValue(value: unknown): boolean {
+  if (value === true) {
+    return true;
+  }
+
+  if (value === false || value === null || value === undefined) {
+    return false;
+  }
+
+  return flattenPropertyValue(value).some((entry) => entry.trim().length > 0);
 }
 
 function parseNumericFrontmatterValues(value: unknown): number[] {
