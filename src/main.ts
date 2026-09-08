@@ -316,10 +316,8 @@ const BASE_ROW_HEIGHT_LABELS: Record<BaseRowHeight, string> = {
   extra: "Extra tall",
 };
 
-const DAILY_PROMPT_BEHAVIOR_LABELS: Record<DailyPromptBehavior, string> = {
-  always: "Always prompt",
-  "if-no-quick-entry": "Only when quick entry is empty",
-};
+const SCHEDULED_DAILY_PROMPT_PLACEHOLDER =
+  "What are today's goals? What am I doing right now? Do I have a plan for the next hours?";
 
 const DEFAULT_REVIEW_BASE_PROPERTIES = [
   "file.name",
@@ -1089,16 +1087,17 @@ export default class JournalingSystemPlugin extends Plugin {
   }
 
   async shouldOpenDailyPrompt(now = moment()): Promise<boolean> {
-    if (this.settings.dailyPrompts.promptBehavior !== "if-no-quick-entry") {
-      return true;
-    }
-
     try {
-      return !(await this.dailyNoteHasQuickEntry(now));
+      return !(await this.dailyNoteHasJournalEntryForDate(now));
     } catch (error) {
-      console.error("Journaling System failed to check daily quick entry", error);
+      console.error("Journaling System failed to check daily journal entry", error);
       return true;
     }
+  }
+
+  async dailyNoteHasJournalEntryForDate(now = moment()): Promise<boolean> {
+    const file = this.app.vault.getFileByPath(this.getDailyNotePath(now));
+    return file ? this.dailyNoteHasJournalEntry(file) : false;
   }
 
   async dailyNoteHasQuickEntry(now = moment()): Promise<boolean> {
@@ -2548,6 +2547,7 @@ export default class JournalingSystemPlugin extends Plugin {
       const propertyName = property.property.trim();
       if (
         propertyName.length > 0 &&
+        property.role !== "long" &&
         !automaticProperties.has(propertyName) &&
         hasMeaningfulFrontmatterValue(frontmatterRecord[propertyName])
       ) {
@@ -3199,6 +3199,8 @@ export default class JournalingSystemPlugin extends Plugin {
 }
 
 class DailyPromptDecisionModal extends Modal {
+  private inputs = new Map<string, JournalFieldInput>();
+
   constructor(
     app: App,
     private readonly plugin: JournalingSystemPlugin,
@@ -3208,44 +3210,116 @@ class DailyPromptDecisionModal extends Modal {
   }
 
   onOpen(): void {
+    void this.render();
+  }
+
+  private async render(): Promise<void> {
     const { contentEl } = this;
+    this.inputs.clear();
     contentEl.empty();
-    contentEl.addClass("journaling-system-prompt");
+    this.modalEl.addClass("journaling-system-modal-shell");
+    applyModalAppearance(this.modalEl, this.plugin.settings);
+    contentEl.addClass("journaling-system-modal journaling-system-prompt");
     this.setTitle("Journaling prompt");
 
-    contentEl.createEl("p", {
-      text: `It is ${this.promptTime}.`,
+    contentEl.createDiv({
+      cls: "journaling-system-prompt-intro",
+      text: `It is ${this.promptTime}, and today's journal is still empty. Capture a quick entry now or choose another action below.`,
     });
 
-    new Setting(contentEl)
-      .addButton((button) => {
-        button
-          .setButtonText("Journal now")
-          .setCta()
-          .onClick(() => {
-            this.close();
-            new JournalingPromptModal(this.app, this.plugin).open();
-          });
-      })
-      .addButton((button) => {
-        button
-          .setButtonText("Journal yesterday")
-          .onClick(() => {
-            this.close();
-            new JournalingPromptModal(this.app, this.plugin, getYesterday()).open();
-          });
-      })
-      .addButton((button) => {
-        button
-          .setButtonText("Snooze")
-          .onClick(async () => {
-            this.close();
-            await this.plugin.snoozeDailyPrompt();
-          });
+    const initialFrontmatter = await this.plugin.getDailyFrontmatter();
+    const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
+    this.inputs = renderDailyPromptFields(
+      this.app,
+      this.plugin,
+      fieldsEl,
+      initialFrontmatter,
+      SCHEDULED_DAILY_PROMPT_PLACEHOLDER
+    );
+    renderDailyReviewReminders(
+      this.app,
+      contentEl,
+      this.plugin.getDailyReviewReminderItems()
+    );
+
+    const buttonRow = contentEl.createDiv({ cls: "journaling-system-modal-actions" });
+    new ButtonComponent(buttonRow)
+      .setButtonText("Save entry")
+      .setCta()
+      .onClick(async () => {
+        await this.saveAndClose();
+      });
+
+    if (this.plugin.getLongProperty().enabled) {
+      new ButtonComponent(buttonRow)
+        .setButtonText("Add long entry")
+        .onClick(async () => {
+          await this.addLongJournalEntry();
+        });
+    }
+
+    new ButtonComponent(buttonRow)
+      .setButtonText("Journal yesterday")
+      .onClick(() => {
+        this.close();
+        new JournalingPromptModal(this.app, this.plugin, getYesterday()).open();
+      });
+
+    new ButtonComponent(buttonRow)
+      .setButtonText("Snooze")
+      .onClick(async () => {
+        this.close();
+        await this.plugin.snoozeDailyPrompt();
+      });
+
+    new ButtonComponent(buttonRow)
+      .setButtonText("Not now")
+      .onClick(() => {
+        this.close();
       });
   }
 
+  private async saveAndClose(): Promise<void> {
+    try {
+      await this.plugin.saveJournal(this.collectValues());
+      new Notice("Journal entry saved for today.");
+      this.close();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "Could not save journal entry.");
+    }
+  }
+
+  private async addLongJournalEntry(): Promise<void> {
+    try {
+      await this.plugin.openLongJournalEntry(this.collectValues());
+      this.close();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "Could not open long journal entry.");
+    }
+  }
+
+  private collectValues(): JournalValue[] {
+    const values: JournalValue[] = [];
+
+    for (const [id, input] of this.inputs) {
+      const value = input.getValue();
+      if (isEmptyJournalValue(value)) {
+        continue;
+      }
+
+      const definition = this.plugin.settings.properties.find((property) => property.id === id);
+      if (!definition) {
+        continue;
+      }
+
+      values.push({ definition, value });
+    }
+
+    return values;
+  }
+
   onClose(): void {
+    this.inputs.clear();
     this.contentEl.empty();
   }
 }
@@ -3935,6 +4009,43 @@ class ReviewWizardModal extends Modal {
   }
 }
 
+function renderDailyPromptFields(
+  app: App,
+  plugin: JournalingSystemPlugin,
+  containerEl: HTMLElement,
+  initialFrontmatter: Record<string, unknown>,
+  shortPlaceholder?: string
+): Map<string, JournalFieldInput> {
+  const inputs = new Map<string, JournalFieldInput>();
+  const properties = plugin
+    .getEnabledProperties()
+    .filter((definition) => definition.role !== "long");
+
+  for (const definition of properties) {
+    const fieldEl = containerEl.createDiv({ cls: "journaling-system-field" });
+    fieldEl.createEl("label", {
+      text: definition.label,
+      cls: "journaling-system-field-label",
+    });
+
+    const inputDefinition =
+      definition.role === "short" && shortPlaceholder
+        ? { ...definition, placeholder: shortPlaceholder }
+        : definition;
+    const input = createJournalInput(
+      app,
+      plugin,
+      fieldEl,
+      inputDefinition,
+      initialFrontmatter[definition.property],
+      "daily"
+    );
+    inputs.set(definition.id, input);
+  }
+
+  return inputs;
+}
+
 class JournalingPromptModal extends Modal {
   private inputs = new Map<string, JournalFieldInput>();
   private readonly targetDate: Moment;
@@ -3963,29 +4074,15 @@ class JournalingPromptModal extends Modal {
 
     const initialFrontmatter = await this.plugin.getDailyFrontmatter(this.targetDate);
     const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
-    const properties = this.plugin
-      .getEnabledProperties()
-      .filter((definition) => definition.role !== "long");
+    this.inputs = renderDailyPromptFields(
+      this.app,
+      this.plugin,
+      fieldsEl,
+      initialFrontmatter
+    );
 
-    for (const definition of properties) {
-      const fieldEl = fieldsEl.createDiv({ cls: "journaling-system-field" });
-      fieldEl.createEl("label", {
-        text: definition.label,
-        cls: "journaling-system-field-label",
-      });
-
-      const input = createJournalInput(
-        this.app,
-        this.plugin,
-        fieldEl,
-        definition,
-        initialFrontmatter[definition.property],
-        "daily"
-      );
-      this.inputs.set(definition.id, input);
-    }
-
-    this.renderReviewReminders(
+    renderDailyReviewReminders(
+      this.app,
       contentEl,
       this.plugin.getDailyReviewReminderItems(this.targetDate)
     );
@@ -4011,58 +4108,6 @@ class JournalingPromptModal extends Modal {
       .onClick(() => {
         this.close();
       });
-  }
-
-  private renderReviewReminders(
-    containerEl: HTMLElement,
-    reminders: DailyReviewReminderItem[]
-  ): void {
-    if (reminders.length === 0) {
-      return;
-    }
-
-    const details = containerEl.createEl("details", {
-      cls: "journaling-system-daily-review-context",
-    });
-    details.createEl("summary", {
-      text: `Review reminders (${reminders.length})`,
-      cls: "journaling-system-review-wizard-summary",
-    });
-
-    const body = details.createDiv({
-      cls: "journaling-system-daily-review-context-body",
-    });
-
-    for (const item of reminders) {
-      const row = body.createDiv({ cls: "journaling-system-daily-review-item" });
-      const content = row.createDiv({
-        cls: "journaling-system-daily-review-item-content",
-      });
-      content.createDiv({
-        cls: "journaling-system-daily-review-item-title",
-        text: `${capitalize(item.level)} · ${item.label}`,
-      });
-      content.createDiv({
-        cls: "journaling-system-daily-review-item-summary",
-        text: item.summary,
-      });
-
-      const actions = row.createDiv({
-        cls: "journaling-system-daily-review-item-actions",
-      });
-      new ButtonComponent(actions)
-        .setButtonText("Open")
-        .onClick(async () => {
-          try {
-            const leaf = this.app.workspace.getLeaf(false);
-            await leaf.openFile(item.file, { active: true });
-          } catch (error) {
-            new Notice(
-              error instanceof Error ? error.message : "Could not open review note."
-            );
-          }
-        });
-    }
   }
 
   async saveAndClose(): Promise<void> {
@@ -4106,6 +4151,59 @@ class JournalingPromptModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+  }
+}
+
+function renderDailyReviewReminders(
+  app: App,
+  containerEl: HTMLElement,
+  reminders: DailyReviewReminderItem[]
+): void {
+  if (reminders.length === 0) {
+    return;
+  }
+
+  const details = containerEl.createEl("details", {
+    cls: "journaling-system-daily-review-context",
+  });
+  details.createEl("summary", {
+    text: `Review reminders (${reminders.length})`,
+    cls: "journaling-system-review-wizard-summary",
+  });
+
+  const body = details.createDiv({
+    cls: "journaling-system-daily-review-context-body",
+  });
+
+  for (const item of reminders) {
+    const row = body.createDiv({ cls: "journaling-system-daily-review-item" });
+    const content = row.createDiv({
+      cls: "journaling-system-daily-review-item-content",
+    });
+    content.createDiv({
+      cls: "journaling-system-daily-review-item-title",
+      text: `${capitalize(item.level)} · ${item.label}`,
+    });
+    content.createDiv({
+      cls: "journaling-system-daily-review-item-summary",
+      text: item.summary,
+    });
+
+    const actions = row.createDiv({
+      cls: "journaling-system-daily-review-item-actions",
+    });
+    new ButtonComponent(actions)
+      .setButtonText("Open")
+      .onClick(async () => {
+        try {
+          const leaf = app.workspace.getLeaf(false);
+          await leaf.openFile(item.file, { active: true });
+        } catch (error) {
+          new Notice(
+            error instanceof Error ? error.message : "Could not open review note."
+          );
+        }
+      });
   }
 }
 
@@ -4964,24 +5062,6 @@ class JournalingSystemSettingTab extends PluginSettingTab {
           this.plugin.settings.dailyPrompts.enabled = value;
           await this.plugin.saveSettings();
         });
-      });
-
-    new Setting(section)
-      .setName("Prompt behavior")
-      .setDesc("Choose whether scheduled daily prompts always appear, or only appear when today's quick-entry field is still empty.")
-      .addDropdown((dropdown) => {
-        dropdown
-          .addOptions(DAILY_PROMPT_BEHAVIOR_LABELS)
-          .setValue(
-            normalizeDailyPromptBehavior(
-              this.plugin.settings.dailyPrompts.promptBehavior
-            )
-          )
-          .onChange(async (value) => {
-            this.plugin.settings.dailyPrompts.promptBehavior =
-              normalizeDailyPromptBehavior(value);
-            await this.plugin.saveSettings();
-          });
       });
 
     section.createEl("h3", { text: "Review reminders" });

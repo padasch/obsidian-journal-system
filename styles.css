@@ -352,6 +352,18 @@
   font-size: calc(var(--journaling-system-modal-font-size) - 1px);
 }
 
+.journaling-system-prompt-intro {
+  background: var(--background-secondary);
+  border-left: 3px solid var(--interactive-accent);
+  color: var(--text-normal);
+  margin-bottom: 14px;
+  padding: 9px 11px;
+}
+
+.journaling-system-prompt .journaling-system-modal-fields {
+  gap: 12px;
+}
+
 .journaling-system-heatmap-summary {
   border-bottom: 1px solid var(--background-modifier-border);
   padding-bottom: 10px;

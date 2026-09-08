@@ -89,9 +89,9 @@ scannable as options grow.
 - Bases settings control generated Obsidian Base blocks, including the editable
   Review Fields Base and source-note Bases. Select which properties should be
   visible and optionally set column widths for fields that need more room.
-- Daily settings control prompt schedule, whether scheduled prompts always
-  appear or only appear when today's quick entry is empty, daily note creation,
-  and the optional review reminder panel. Weekly, monthly, and annual settings
+- Daily settings control prompt schedule, the empty-day gate for scheduled
+  prompts, daily note creation, and the optional review reminder panel. Weekly,
+  monthly, and annual settings
   control the review prompt schedule, review note name format, checklist prompts,
   and whether that level embeds daily long entries. Monthly prompts are now
   scheduled for the first occurrence of the configured weekly weekday in each
@@ -137,9 +137,12 @@ one value on each line.
 
 When the journaling modal is reopened for a daily note that already has journal
 properties, existing values are prefilled so the entry can be continued or edited.
-Scheduled daily prompts can be set to always ask, or to ask only when the current
-daily note has no quick entry yet. The command `Open daily journal prompt` remains
-manual and always opens the modal.
+Scheduled daily prompts are shown only when the current day has no meaningful
+journal entry yet. The scheduled popup includes the configured daily fields and
+an action-oriented short-entry placeholder, plus the same collapsed review
+reminders as the full prompt, so a response can be written without opening a
+second modal. The command `Open daily journal prompt` remains manual and always
+opens the full modal.
 
 Use `Open yesterday's daily journal prompt` or `Open yesterday's long journal
 entry` when writing after midnight but saving the entry to the previous day's
