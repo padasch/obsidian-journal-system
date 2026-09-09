@@ -3210,10 +3210,10 @@ class DailyPromptDecisionModal extends Modal {
   }
 
   onOpen(): void {
-    this.render();
+    this.renderContent();
   }
 
-  private render(): void {
+  private renderContent(): void {
     const { contentEl } = this;
     this.inputs.clear();
     contentEl.empty();
@@ -4077,10 +4077,10 @@ class JournalingPromptModal extends Modal {
   }
 
   onOpen(): void {
-    void this.render();
+    void this.renderContent();
   }
 
-  private async render(): Promise<void> {
+  private async renderContent(): Promise<void> {
     const { contentEl } = this;
     this.inputs.clear();
     contentEl.empty();
