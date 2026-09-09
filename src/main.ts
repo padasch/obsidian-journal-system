@@ -3210,10 +3210,10 @@ class DailyPromptDecisionModal extends Modal {
   }
 
   onOpen(): void {
-    void this.render();
+    this.render();
   }
 
-  private async render(): Promise<void> {
+  private render(): void {
     const { contentEl } = this;
     this.inputs.clear();
     contentEl.empty();
@@ -3227,13 +3227,12 @@ class DailyPromptDecisionModal extends Modal {
       text: `It is ${this.promptTime}, and today's journal is still empty. Capture a quick entry now or choose another action below.`,
     });
 
-    const initialFrontmatter = await this.plugin.getDailyFrontmatter();
     const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
     this.inputs = renderDailyPromptFields(
       this.app,
       this.plugin,
       fieldsEl,
-      initialFrontmatter,
+      {},
       SCHEDULED_DAILY_PROMPT_PLACEHOLDER
     );
     renderDailyReviewReminders(
