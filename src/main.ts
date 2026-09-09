@@ -3217,10 +3217,15 @@ class DailyPromptDecisionModal extends Modal {
     const { contentEl } = this;
     this.inputs.clear();
     contentEl.empty();
-    this.modalEl.addClass("journaling-system-modal-shell");
-    applyModalAppearance(this.modalEl, this.plugin.settings);
     contentEl.addClass("journaling-system-modal journaling-system-prompt");
     this.setTitle("Journaling prompt");
+
+    try {
+      this.modalEl.addClass("journaling-system-modal-shell");
+      applyModalAppearance(this.modalEl, this.plugin.settings);
+    } catch (error) {
+      console.error("Journaling System could not apply daily prompt appearance", error);
+    }
 
     contentEl.createDiv({
       cls: "journaling-system-prompt-intro",
@@ -3228,18 +3233,31 @@ class DailyPromptDecisionModal extends Modal {
     });
 
     const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
-    this.inputs = renderDailyPromptFields(
-      this.app,
-      this.plugin,
-      fieldsEl,
-      {},
-      SCHEDULED_DAILY_PROMPT_PLACEHOLDER
-    );
-    renderDailyReviewReminders(
-      this.app,
-      contentEl,
-      this.plugin.getDailyReviewReminderItems()
-    );
+    try {
+      this.inputs = renderDailyPromptFields(
+        this.app,
+        this.plugin,
+        fieldsEl,
+        {},
+        SCHEDULED_DAILY_PROMPT_PLACEHOLDER
+      );
+    } catch (error) {
+      console.error("Journaling System could not render scheduled daily fields", error);
+      fieldsEl.createDiv({
+        cls: "journaling-system-field-hint",
+        text: "Daily fields could not be loaded. You can still choose an action below.",
+      });
+    }
+
+    try {
+      renderDailyReviewReminders(
+        this.app,
+        contentEl,
+        this.plugin.getDailyReviewReminderItems()
+      );
+    } catch (error) {
+      console.error("Journaling System could not render daily review reminders", error);
+    }
 
     const buttonRow = contentEl.createDiv({ cls: "journaling-system-modal-actions" });
     new ButtonComponent(buttonRow)
