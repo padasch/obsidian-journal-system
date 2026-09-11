@@ -3217,15 +3217,8 @@ class DailyPromptDecisionModal extends Modal {
     const { contentEl } = this;
     this.inputs.clear();
     contentEl.empty();
-    contentEl.addClass("journaling-system-modal journaling-system-prompt");
+    contentEl.addClass("journaling-system-prompt");
     this.setTitle("Journaling prompt");
-
-    try {
-      this.modalEl.addClass("journaling-system-modal-shell");
-      applyModalAppearance(this.modalEl, this.plugin.settings);
-    } catch (error) {
-      console.error("Journaling System could not apply daily prompt appearance", error);
-    }
 
     contentEl.createDiv({
       cls: "journaling-system-prompt-intro",
@@ -3259,41 +3252,49 @@ class DailyPromptDecisionModal extends Modal {
       console.error("Journaling System could not render daily review reminders", error);
     }
 
-    const buttonRow = contentEl.createDiv({ cls: "journaling-system-modal-actions" });
-    new ButtonComponent(buttonRow)
-      .setButtonText("Save entry")
-      .setCta()
-      .onClick(async () => {
-        await this.saveAndClose();
-      });
+    const actionSetting = new Setting(contentEl).addButton((button) => {
+      button
+        .setButtonText("Save entry")
+        .setCta()
+        .onClick(async () => {
+          await this.saveAndClose();
+        });
+    });
 
     if (this.plugin.getLongProperty().enabled) {
-      new ButtonComponent(buttonRow)
-        .setButtonText("Add long entry")
-        .onClick(async () => {
-          await this.addLongJournalEntry();
-        });
+      actionSetting.addButton((button) => {
+        button
+          .setButtonText("Add long entry")
+          .onClick(async () => {
+            await this.addLongJournalEntry();
+          });
+      });
     }
 
-    new ButtonComponent(buttonRow)
-      .setButtonText("Journal yesterday")
-      .onClick(() => {
-        this.close();
-        new JournalingPromptModal(this.app, this.plugin, getYesterday()).open();
+    actionSetting
+      .addButton((button) => {
+        button
+          .setButtonText("Journal yesterday")
+          .onClick(() => {
+            this.close();
+            new JournalingPromptModal(this.app, this.plugin, getYesterday()).open();
+          });
       });
 
-    new ButtonComponent(buttonRow)
-      .setButtonText("Snooze")
-      .onClick(async () => {
-        this.close();
-        await this.plugin.snoozeDailyPrompt();
+    actionSetting.addButton((button) => {
+      button
+        .setButtonText("Snooze")
+        .onClick(async () => {
+          this.close();
+          await this.plugin.snoozeDailyPrompt();
+        });
       });
 
-    new ButtonComponent(buttonRow)
-      .setButtonText("Not now")
-      .onClick(() => {
+    actionSetting.addButton((button) => {
+      button.setButtonText("Not now").onClick(() => {
         this.close();
       });
+    });
   }
 
   private async saveAndClose(): Promise<void> {
