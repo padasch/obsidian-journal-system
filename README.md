@@ -118,6 +118,7 @@ the parsed folder underneath the setting.
 ## Current commands
 
 - `Journaling System: Open daily journal prompt`
+- `Journaling System: Open scheduled daily journal prompt`
 - `Journaling System: Open yesterday's daily journal prompt`
 - `Journaling System: Open long journal entry`
 - `Journaling System: Open yesterday's long journal entry`
@@ -141,8 +142,10 @@ Scheduled daily prompts are shown only when the current day has no meaningful
 journal entry yet. The scheduled popup includes the configured daily fields and
 an action-oriented short-entry placeholder, plus the same collapsed review
 reminders as the full prompt, so a response can be written without opening a
-second modal. The command `Open daily journal prompt` remains manual and always
-opens the full modal.
+second modal. Use `Open scheduled daily journal prompt` to open this same popup
+immediately without waiting for the configured schedule; this manual command does
+not change the schedule or snooze state. The command `Open daily journal prompt`
+remains manual and always opens the full modal.
 
 Use `Open yesterday's daily journal prompt` or `Open yesterday's long journal
 entry` when writing after midnight but saving the entry to the previous day's

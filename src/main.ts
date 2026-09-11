@@ -728,6 +728,14 @@ export default class JournalingSystemPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "open-scheduled-daily-journal-prompt",
+      name: "Open scheduled daily journal prompt",
+      callback: () => {
+        new DailyPromptDecisionModal(this.app, this, moment().format("HH:mm")).open();
+      },
+    });
+
+    this.addCommand({
       id: "open-yesterday-journaling-prompt",
       name: "Open yesterday's daily journal prompt",
       callback: () => {
