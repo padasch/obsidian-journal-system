@@ -41,7 +41,6 @@ type JournalType = "daily" | ReviewLevel;
 type BaseRowHeight = "default" | "short" | "medium" | "tall" | "extra";
 type BaseColumnSizes = Record<string, number>;
 type BasePropertyListKey = "baseProperties" | "reviewBaseProperties";
-type DailyPromptBehavior = "always" | "if-no-quick-entry";
 type LocalAiProvider = "ollama";
 type TopicSuggestionScope = "daily" | ReviewLevel;
 
@@ -61,6 +60,16 @@ interface DailyReviewContextSettings {
   enabled: boolean;
   showOnDesktop: boolean;
   showOnMobile: boolean;
+}
+
+type DailyPromptMotivation =
+  | { kind: "streak"; days: number }
+  | { kind: "gap"; days: number }
+  | { kind: "new" };
+
+interface DailyPromptOpenOptions {
+  automated?: boolean;
+  motivation?: DailyPromptMotivation | null;
 }
 
 interface JournalPropertyDefinition {
@@ -102,11 +111,8 @@ interface JournalingSystemSettings {
     enabled: boolean;
     times: string[];
     weekdays: Weekday[];
-    snoozeMinutes: number;
     catchUpMissedPrompts: boolean;
-    promptBehavior: DailyPromptBehavior;
     lastPromptKey: string;
-    snoozedUntil: number;
     reviewContext: DailyReviewContextSettings;
   };
   dailyNote: {
@@ -257,7 +263,7 @@ interface NumericPropertySummary {
   max: number;
 }
 
-const SETTINGS_SCHEMA_VERSION = 13;
+const SETTINGS_SCHEMA_VERSION = 14;
 const moment = obsidianMoment as unknown as () => Moment;
 
 function getYesterday(): Moment {
@@ -621,11 +627,8 @@ const DEFAULT_SETTINGS: JournalingSystemSettings = {
     enabled: true,
     times: ["09:00", "20:00"],
     weekdays: [...WEEKDAYS],
-    snoozeMinutes: 30,
     catchUpMissedPrompts: true,
-    promptBehavior: "always",
     lastPromptKey: "",
-    snoozedUntil: 0,
     reviewContext: {
       enabled: true,
       showOnDesktop: true,
@@ -730,8 +733,8 @@ export default class JournalingSystemPlugin extends Plugin {
     this.addCommand({
       id: "open-scheduled-daily-journal-prompt",
       name: "Open scheduled daily journal prompt",
-      callback: () => {
-        new DailyPromptDecisionModal(this.app, this, moment().format("HH:mm")).open();
+      callback: async () => {
+        await this.openAutomatedDailyPrompt();
       },
     });
 
@@ -1063,7 +1066,7 @@ export default class JournalingSystemPlugin extends Plugin {
   async checkDailyPrompt(now = moment()): Promise<void> {
     const prompts = this.settings.dailyPrompts;
 
-    if (!prompts.enabled || prompts.snoozedUntil > Date.now()) {
+    if (!prompts.enabled) {
       return;
     }
 
@@ -1091,7 +1094,7 @@ export default class JournalingSystemPlugin extends Plugin {
       return;
     }
 
-    new DailyPromptDecisionModal(this.app, this, dueTime).open();
+    await this.openAutomatedDailyPrompt(now);
   }
 
   async shouldOpenDailyPrompt(now = moment()): Promise<boolean> {
@@ -1108,34 +1111,57 @@ export default class JournalingSystemPlugin extends Plugin {
     return file ? this.dailyNoteHasJournalEntry(file) : false;
   }
 
-  async dailyNoteHasQuickEntry(now = moment()): Promise<boolean> {
-    const shortProperty = this.getShortProperty();
-    const propertyName = shortProperty?.property.trim() ?? "";
-    const file = this.app.vault.getFileByPath(this.getDailyNotePath(now));
-
-    if (!file) {
-      return false;
+  async openAutomatedDailyPrompt(now = moment()): Promise<void> {
+    let motivation: DailyPromptMotivation | null = null;
+    try {
+      motivation = await this.getDailyPromptMotivation(now);
+    } catch (error) {
+      console.error("Journaling System failed to calculate daily prompt motivation", error);
     }
 
-    if (propertyName.length > 0) {
-      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-      if (
-        isRecord(frontmatter) &&
-        flattenPropertyValue(frontmatter[propertyName]).some(
-          (entry) => entry.trim().length > 0
-        )
-      ) {
-        return true;
+    new JournalingPromptModal(this.app, this, now, {
+      automated: true,
+      motivation,
+    }).open();
+  }
+
+  async getDailyPromptMotivation(now = moment()): Promise<DailyPromptMotivation> {
+    const today = now.clone().startOf("day");
+    const dailyNotes = Array.from(this.getDailyNotesByDate().entries())
+      .map(([key, file]) => ({ key, file, date: parseJournalDate(key) }))
+      .filter(
+        (entry): entry is { key: string; file: TFile; date: Moment } =>
+          entry.date !== null && !entry.date.isAfter(today, "day")
+      )
+      .sort((a, b) => b.date.valueOf() - a.date.valueOf());
+    const entryDates = new Set<string>();
+
+    for (const entry of dailyNotes) {
+      if (await this.dailyNoteHasJournalEntry(entry.file)) {
+        entryDates.add(entry.key);
       }
     }
 
-    const heading = this.settings.dailyNote.shortEntrySectionHeading.trim();
-    if (heading.length === 0) {
-      return false;
+    let streak = 0;
+    const cursor = today.clone().subtract(1, "day");
+    while (entryDates.has(cursor.format("YYYY-MM-DD"))) {
+      streak += 1;
+      cursor.subtract(1, "day");
     }
 
-    const content = await this.app.vault.read(file);
-    return extractNormalizedCaptureEntries(content, heading).size > 0;
+    if (streak > 0) {
+      return { kind: "streak", days: streak };
+    }
+
+    const lastEntry = dailyNotes.find((entry) => entryDates.has(entry.key));
+    if (!lastEntry) {
+      return { kind: "new" };
+    }
+
+    return {
+      kind: "gap",
+      days: Math.max(1, today.diff(lastEntry.date, "days")),
+    };
   }
 
   async checkReviewPrompts(now = moment()): Promise<void> {
@@ -1185,13 +1211,6 @@ export default class JournalingSystemPlugin extends Plugin {
     reviewSettings.lastPromptKey = key;
     await this.saveSettings();
     new ReviewPromptDecisionModal(this.app, this, level).open();
-  }
-
-  async snoozeDailyPrompt(): Promise<void> {
-    this.settings.dailyPrompts.snoozedUntil =
-      Date.now() + this.settings.dailyPrompts.snoozeMinutes * 60_000;
-    await this.saveSettings();
-    new Notice(`Journaling prompt snoozed for ${this.settings.dailyPrompts.snoozeMinutes} minutes.`);
   }
 
   async snoozeReviewPrompt(level: ReviewLevel): Promise<void> {
@@ -2496,12 +2515,10 @@ export default class JournalingSystemPlugin extends Plugin {
     return cells;
   }
 
-  private getHeatmapDailyNotesByDate(now: Moment): Map<string, TFile> {
+  private getDailyNotesByDate(): Map<string, TFile> {
     const automatic = this.settings.automaticProperties;
     const typeProperty = automatic.type.trim() || DEFAULT_SETTINGS.automaticProperties.type;
     const dateProperty = automatic.date.trim() || DEFAULT_SETTINGS.automaticProperties.date;
-    const year = now.format("YYYY");
-    const canonicalPaths = new Set<string>();
     const notesByDate = new Map<string, TFile>();
 
     for (const file of this.app.vault.getMarkdownFiles()) {
@@ -2513,11 +2530,10 @@ export default class JournalingSystemPlugin extends Plugin {
       }
 
       const date = getJournalMoment(file, frontmatterRecord, dateProperty);
-      if (!date?.isValid() || date.format("YYYY") !== year) {
+      if (!date?.isValid()) {
         continue;
       }
 
-      canonicalPaths.add(this.getDailyNotePath(date));
       const key = date.format("YYYY-MM-DD");
       const existing = notesByDate.get(key);
       if (!existing || file.path === this.getDailyNotePath(date)) {
@@ -2525,21 +2541,14 @@ export default class JournalingSystemPlugin extends Plugin {
       }
     }
 
-    for (const path of canonicalPaths) {
-      const file = this.app.vault.getFileByPath(path);
-      if (!file) {
-        continue;
-      }
-
-      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-      const frontmatterRecord = isRecord(frontmatter) ? frontmatter : {};
-      const date = getJournalMoment(file, frontmatterRecord, dateProperty);
-      if (date?.isValid() && date.format("YYYY") === year) {
-        notesByDate.set(date.format("YYYY-MM-DD"), file);
-      }
-    }
-
     return notesByDate;
+  }
+
+  private getHeatmapDailyNotesByDate(now: Moment): Map<string, TFile> {
+    const year = now.format("YYYY");
+    return new Map(
+      Array.from(this.getDailyNotesByDate()).filter(([key]) => key.startsWith(`${year}-`))
+    );
   }
 
   private async dailyNoteHasJournalEntry(file: TFile): Promise<boolean> {
@@ -3203,150 +3212,6 @@ export default class JournalingSystemPlugin extends Plugin {
     }
 
     return values;
-  }
-}
-
-class DailyPromptDecisionModal extends Modal {
-  private inputs = new Map<string, JournalFieldInput>();
-
-  constructor(
-    app: App,
-    private readonly plugin: JournalingSystemPlugin,
-    private readonly promptTime: string
-  ) {
-    super(app);
-  }
-
-  onOpen(): void {
-    this.renderContent();
-  }
-
-  private renderContent(): void {
-    const { contentEl } = this;
-    this.inputs.clear();
-    contentEl.empty();
-    contentEl.addClass("journaling-system-prompt");
-    this.setTitle("Journaling prompt");
-
-    contentEl.createDiv({
-      cls: "journaling-system-prompt-intro",
-      text: `It is ${this.promptTime}, and today's journal is still empty. Capture a quick entry now or choose another action below.`,
-    });
-
-    const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
-    try {
-      this.inputs = renderDailyPromptFields(
-        this.app,
-        this.plugin,
-        fieldsEl,
-        {},
-        SCHEDULED_DAILY_PROMPT_PLACEHOLDER
-      );
-    } catch (error) {
-      console.error("Journaling System could not render scheduled daily fields", error);
-      fieldsEl.createDiv({
-        cls: "journaling-system-field-hint",
-        text: "Daily fields could not be loaded. You can still choose an action below.",
-      });
-    }
-
-    try {
-      renderDailyReviewReminders(
-        this.app,
-        contentEl,
-        this.plugin.getDailyReviewReminderItems()
-      );
-    } catch (error) {
-      console.error("Journaling System could not render daily review reminders", error);
-    }
-
-    const actionSetting = new Setting(contentEl).addButton((button) => {
-      button
-        .setButtonText("Save entry")
-        .setCta()
-        .onClick(async () => {
-          await this.saveAndClose();
-        });
-    });
-
-    if (this.plugin.getLongProperty().enabled) {
-      actionSetting.addButton((button) => {
-        button
-          .setButtonText("Add long entry")
-          .onClick(async () => {
-            await this.addLongJournalEntry();
-          });
-      });
-    }
-
-    actionSetting
-      .addButton((button) => {
-        button
-          .setButtonText("Journal yesterday")
-          .onClick(() => {
-            this.close();
-            new JournalingPromptModal(this.app, this.plugin, getYesterday()).open();
-          });
-      });
-
-    actionSetting.addButton((button) => {
-      button
-        .setButtonText("Snooze")
-        .onClick(async () => {
-          this.close();
-          await this.plugin.snoozeDailyPrompt();
-        });
-      });
-
-    actionSetting.addButton((button) => {
-      button.setButtonText("Not now").onClick(() => {
-        this.close();
-      });
-    });
-  }
-
-  private async saveAndClose(): Promise<void> {
-    try {
-      await this.plugin.saveJournal(this.collectValues());
-      new Notice("Journal entry saved for today.");
-      this.close();
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : "Could not save journal entry.");
-    }
-  }
-
-  private async addLongJournalEntry(): Promise<void> {
-    try {
-      await this.plugin.openLongJournalEntry(this.collectValues());
-      this.close();
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : "Could not open long journal entry.");
-    }
-  }
-
-  private collectValues(): JournalValue[] {
-    const values: JournalValue[] = [];
-
-    for (const [id, input] of this.inputs) {
-      const value = input.getValue();
-      if (isEmptyJournalValue(value)) {
-        continue;
-      }
-
-      const definition = this.plugin.settings.properties.find((property) => property.id === id);
-      if (!definition) {
-        continue;
-      }
-
-      values.push({ definition, value });
-    }
-
-    return values;
-  }
-
-  onClose(): void {
-    this.inputs.clear();
-    this.contentEl.empty();
   }
 }
 
@@ -4075,14 +3940,17 @@ function renderDailyPromptFields(
 class JournalingPromptModal extends Modal {
   private inputs = new Map<string, JournalFieldInput>();
   private readonly targetDate: Moment;
+  private readonly options: DailyPromptOpenOptions;
 
   constructor(
     app: App,
     private readonly plugin: JournalingSystemPlugin,
-    targetDate: Moment = moment()
+    targetDate: Moment = moment(),
+    options: DailyPromptOpenOptions = {}
   ) {
     super(app);
     this.targetDate = targetDate.clone();
+    this.options = options;
   }
 
   onOpen(): void {
@@ -4098,20 +3966,48 @@ class JournalingPromptModal extends Modal {
     contentEl.addClass("journaling-system-modal");
     this.setTitle(`Journal entry for ${this.targetDate.format("YYYY-MM-DD dddd")}`);
 
-    const initialFrontmatter = await this.plugin.getDailyFrontmatter(this.targetDate);
-    const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
-    this.inputs = renderDailyPromptFields(
-      this.app,
-      this.plugin,
-      fieldsEl,
-      initialFrontmatter
-    );
+    if (this.options.automated && this.options.motivation) {
+      contentEl.createDiv({
+        cls: "journaling-system-prompt-intro",
+        text: formatDailyPromptMotivation(this.options.motivation),
+      });
+    }
 
-    renderDailyReviewReminders(
-      this.app,
-      contentEl,
-      this.plugin.getDailyReviewReminderItems(this.targetDate)
-    );
+    let initialFrontmatter: Record<string, unknown> = {};
+    if (!this.options.automated) {
+      try {
+        initialFrontmatter = await this.plugin.getDailyFrontmatter(this.targetDate);
+      } catch (error) {
+        console.error("Journaling System could not load daily journal values", error);
+      }
+    }
+
+    const fieldsEl = contentEl.createDiv({ cls: "journaling-system-modal-fields" });
+    try {
+      this.inputs = renderDailyPromptFields(
+        this.app,
+        this.plugin,
+        fieldsEl,
+        initialFrontmatter,
+        this.options.automated ? SCHEDULED_DAILY_PROMPT_PLACEHOLDER : undefined
+      );
+    } catch (error) {
+      console.error("Journaling System could not render daily journal fields", error);
+      fieldsEl.createDiv({
+        cls: "journaling-system-field-hint",
+        text: "Daily fields could not be loaded. You can still save or cancel the prompt.",
+      });
+    }
+
+    try {
+      renderDailyReviewReminders(
+        this.app,
+        contentEl,
+        this.plugin.getDailyReviewReminderItems(this.targetDate)
+      );
+    } catch (error) {
+      console.error("Journaling System could not render daily review reminders", error);
+    }
 
     const buttonRow = contentEl.createDiv({ cls: "journaling-system-modal-actions" });
     new ButtonComponent(buttonRow)
@@ -4178,6 +4074,22 @@ class JournalingPromptModal extends Modal {
   onClose(): void {
     this.contentEl.empty();
   }
+}
+
+function formatDailyPromptMotivation(motivation: DailyPromptMotivation): string {
+  if (motivation.kind === "streak") {
+    const nextDays = motivation.days + 1;
+    const currentNoun = motivation.days === 1 ? "day" : "days";
+    const nextNoun = nextDays === 1 ? "day" : "days";
+    return `You are on a ${motivation.days}-${currentNoun} journaling streak. Write something today to make it ${nextDays} ${nextNoun}!`;
+  }
+
+  if (motivation.kind === "gap") {
+    const noun = motivation.days === 1 ? "day" : "days";
+    return `You have not journaled for ${motivation.days} ${noun} in a row. Today can restart the habit!`;
+  }
+
+  return "You have not journaled before. Today can be day 1!";
 }
 
 function renderDailyReviewReminders(
@@ -5178,23 +5090,6 @@ class JournalingSystemSettingTab extends PluginSettingTab {
         this.refreshSettingsView();
       });
     }
-
-    new Setting(section)
-      .setName("Snooze minutes")
-      .setDesc("How long the prompt waits before asking again when snoozed.")
-      .addText((text) => {
-        text.inputEl.type = "number";
-        text
-          .setValue(String(this.plugin.settings.dailyPrompts.snoozeMinutes))
-          .onChange(async (value) => {
-            this.plugin.settings.dailyPrompts.snoozeMinutes = clamp(
-              parseInteger(value, 30),
-              1,
-              1440
-            );
-            await this.plugin.saveSettings();
-          });
-      });
 
     new Setting(section)
       .setName("Catch up missed prompts")
@@ -6453,9 +6348,6 @@ function normalizeSettings(saved: unknown): JournalingSystemSettings {
   settings.ui.reviewContextHeightPx = normalizeReviewContextHeight(
     settings.ui.reviewContextHeightPx
   );
-  settings.dailyPrompts.promptBehavior = normalizeDailyPromptBehavior(
-    settings.dailyPrompts.promptBehavior
-  );
   settings.dailyPrompts.reviewContext = normalizeDailyReviewContextSettings(
     settings.dailyPrompts.reviewContext
   );
@@ -7072,10 +6964,6 @@ function normalizeBaseRowHeight(value: unknown): BaseRowHeight {
 
 function encodeBaseRowHeight(value: BaseRowHeight): string {
   return value;
-}
-
-function normalizeDailyPromptBehavior(value: unknown): DailyPromptBehavior {
-  return value === "if-no-quick-entry" ? value : "always";
 }
 
 function normalizeDailyReviewContextSettings(
